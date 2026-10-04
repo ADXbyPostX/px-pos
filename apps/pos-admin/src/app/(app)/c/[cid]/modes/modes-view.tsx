@@ -3,9 +3,9 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { collection, query } from "firebase/firestore";
-import { Armchair, Bike, Loader2, Zap } from "lucide-react";
+import { Armchair, Bike, ChefHat, Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { paths, updateClientPlan, type Client, type OrderMode, type Paise, type Table } from "@px-pos/core";
+import { kitchenOn, paths, updateClientPlan, type Client, type OrderMode, type Paise, type Table } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Field } from "@/components/shared/field";
@@ -111,11 +111,13 @@ export function ModesView() {
     save({ charges: { ...client.charges, packagingOn: v ? [...new Set([...client.charges.packagingOn, m])] : client.charges.packagingOn.filter((x) => x !== m) } });
 
   const activeTables = tables.data.filter((t) => t.active).length;
+  // Stored preferences (older clients have none: both on). The panel greys the KOT switch while the kitchen is off.
+  const kitchen = { enabled: kitchenOn(client), printKots: client.kitchen?.printKots !== false };
 
   return (
     <>
       <PageHeader title="Order modes" />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-4">
         <ModePanel title="Table service" icon={<Armchair aria-hidden />} on={client.orderModes.dineIn} onToggle={(v) => toggleMode("dineIn", v)} disabledReason={openBy("dineIn") ? `${openBy("dineIn")} running` : null}>
           <SwitchRow label="Ask for covers (guests) when a table opens" checked={client.modeOpts.dineIn.askCovers} onCheckedChange={(v) => void save({ modeOpts: { ...client.modeOpts, dineIn: { ...client.modeOpts.dineIn, askCovers: v } } })} />
           <SwitchRow label="Return to tables after sending a KOT" checked={client.modeOpts.dineIn.backToTables} onCheckedChange={(v) => void save({ modeOpts: { ...client.modeOpts, dineIn: { ...client.modeOpts.dineIn, backToTables: v } } })} />
@@ -138,6 +140,11 @@ export function ModesView() {
           <SwitchRow label="New delivery orders are prepaid by default" checked={client.modeOpts.delivery.defaultPrepaid} onCheckedChange={(v) => void save({ modeOpts: { ...client.modeOpts, delivery: { defaultPrepaid: v } } })} />
           <SwitchRow label="Packaging charge on delivery" checked={packagingOn("delivery")} onCheckedChange={(v) => void setPackagingOn("delivery", v)} />
           <ChargeField label="Delivery charge per order" value={client.charges.deliveryPaise} onSave={(p) => save({ charges: { ...client.charges, deliveryPaise: p } }, "Delivery charge saved")} />
+        </ModePanel>
+
+        {/* Off: no Kitchen screen on the tills and no KOT tickets; orders are still recorded in full. */}
+        <ModePanel title="Kitchen" icon={<ChefHat aria-hidden />} on={kitchen.enabled} onToggle={(v) => void save({ kitchen: { ...kitchen, enabled: v } }, v ? "Kitchen turned on" : "Kitchen turned off")}>
+          <SwitchRow label="Print a KOT ticket for every order" checked={kitchen.printKots} onCheckedChange={(v) => void save({ kitchen: { ...kitchen, printKots: v } })} />
         </ModePanel>
       </div>
     </>

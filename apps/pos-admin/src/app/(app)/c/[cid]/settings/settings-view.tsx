@@ -20,7 +20,6 @@ import {
   type ApprovalKey,
   type Client,
   type InvoicePrint,
-  type PriceMode,
   type Rounding,
   type TaxMode,
 } from "@px-pos/core";
@@ -69,7 +68,7 @@ function samplePrint(d: Draft): InvoicePrint {
     serviceChargeOptIn: false,
     charges: d.charges,
     mode: "dineIn",
-    client: { taxMode: d.taxMode, priceMode: d.priceMode, rounding: d.rounding, defaultTaxBps: d.defaultTaxBps },
+    client: { taxMode: d.taxMode, rounding: d.rounding, defaultTaxBps: d.defaultTaxBps },
   });
   const now = Date.now();
   return {
@@ -202,19 +201,13 @@ export function SettingsView() {
             <Field label="Default GST rate" htmlFor="st-rate">
               <SelectField id="st-rate" value={String(d.defaultTaxBps)} onValueChange={(v) => set("defaultTaxBps", Number(v))} options={TAX_RATES.map((r) => ({ value: String(r), label: rateLabel(r) }))} disabled={d.taxMode !== "regular"} />
             </Field>
-            <Field label="Menu prices">
-              <ToggleGroup type="single" variant="outline" value={d.priceMode} onValueChange={(v) => v && set("priceMode", v as PriceMode)} className="w-full" aria-label="Menu prices">
-                <ToggleGroupItem value="exclusive" className="flex-1">+ GST</ToggleGroupItem>
-                <ToggleGroupItem value="inclusive" className="flex-1">GST included</ToggleGroupItem>
+            <Field label="Round bill total">
+              <ToggleGroup type="single" variant="outline" value={d.rounding} onValueChange={(v) => v && set("rounding", v as Rounding)} className="w-full" aria-label="Rounding">
+                <ToggleGroupItem value="rupee" className="flex-1">Nearest rupee</ToggleGroupItem>
+                <ToggleGroupItem value="none" className="flex-1">Keep paise</ToggleGroupItem>
               </ToggleGroup>
             </Field>
           </FieldRow>
-          <Field label="Round bill total">
-            <ToggleGroup type="single" variant="outline" value={d.rounding} onValueChange={(v) => v && set("rounding", v as Rounding)} className="w-full" aria-label="Rounding">
-              <ToggleGroupItem value="rupee" className="flex-1">To the nearest rupee</ToggleGroupItem>
-              <ToggleGroupItem value="none" className="flex-1">Keep paise</ToggleGroupItem>
-            </ToggleGroup>
-          </Field>
         </Panel>
 
         <Panel title="Payments" bodyClassName="flex flex-col gap-4 p-4">

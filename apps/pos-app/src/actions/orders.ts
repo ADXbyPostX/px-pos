@@ -8,10 +8,12 @@ import {
   invoiceDocId,
   invoiceLinesFor,
   istDate,
+  kitchenOn,
   kotPlan,
   quickPlan,
   settlePlan,
   settleTenders,
+  voidTicketPlan,
   type AppliedTender,
   type BillResult,
   type BizDate,
@@ -122,6 +124,7 @@ export function sendKot(d: ActionDeps, t: Ticket, existing: WithId<Order> | null
         lines: t.lines,
         alloc: { numbers: kotNums, terminalCode: code },
         tracked: d.tracked,
+        kitchen: kitchenOn(d.session.client),
       });
       return { plan, result: { orderId, orderNo, kots: plan.kots.map((k) => ({ id: k.id, kotNo: k.kotNo, station: k.station, items: k.items })) } };
     },
@@ -181,6 +184,34 @@ export function settleOrder(d: ActionDeps, order: WithId<Order>, tenders: Tender
   return row;
 }
 
+/**
+ * Void a ticket nobody sent or paid for. It gets an order number and is kept as a cancelled
+ * order with the reason, so it shows in the day's voids (and in admin Orders). Works offline.
+ */
+export function voidTicket(d: ActionDeps, t: Ticket, reason: string): JournalRow<{ orderId: string; orderNo: string }> {
+  if (!t.lines.length) throw new Error("The ticket is empty");
+  const code = d.session.terminal.code;
+  const { row } = allocateAndJournal<{ orderId: string; orderNo: string }>(`tvoid:${t.id}`, [{ key: counterKey.order(d.session.tid, d.bizDate), count: 1 }], (nums) => {
+    const orderNo = formatOrderNo(code, nums[0]![0]!);
+    const plan = voidTicketPlan(planCtx(d.session, d.operator), {
+      create: {
+        id: t.id,
+        orderNo,
+        mode: t.mode,
+        businessDate: d.bizDate,
+        ...(t.tableId ? { tableId: t.tableId, tableLabel: t.tableLabel } : {}),
+        ...(t.customer ? { customer: t.customer } : {}),
+      },
+      lines: t.lines,
+      reason,
+    });
+    return { plan, result: { orderId: t.id, orderNo } };
+  });
+  submit(row);
+  deleteDraft(t.id);
+  return row;
+}
+
 export interface QuickResult extends KotResult, BillResultInfo, SettleInfo {
   token: number;
 }
@@ -221,6 +252,7 @@ export function quickCheckout(d: ActionDeps, t: Ticket, tenders: TenderInput[], 
         tipPaise,
         tracked: d.tracked,
         serviceChargeOptIn: t.serviceChargeOptIn,
+        kitchen: kitchenOn(d.session.client),
       });
       return {
         plan,

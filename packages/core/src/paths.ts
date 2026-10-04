@@ -63,6 +63,7 @@ export const postingKey = {
   quick: (orderId: string) => `quick:${orderId}`,
   settle: (orderId: string) => `settle:${orderId}`,
   lineVoid: (orderId: string, lineId: string, n: number) => `void:${orderId}:${lineId}:${n}`,
+  ticketVoid: (orderId: string) => `tvoid:${orderId}`,
   cancelBill: (orderId: string) => `cancel:${orderId}`,
   expense: (id: string) => `exp:${id}`,
   expenseVoid: (id: string) => `expvoid:${id}`,

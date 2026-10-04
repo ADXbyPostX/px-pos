@@ -32,7 +32,7 @@ const bill = computeBill({
   serviceChargeOptIn: false,
   charges: { packagingPaise: 1000, packagingOn: ["dineIn"], deliveryPaise: 0, serviceChargeBps: 0 },
   mode: "dineIn",
-  client: { taxMode: "regular", priceMode: "exclusive", rounding: "rupee", defaultTaxBps: 500 },
+  client: { taxMode: "regular", rounding: "rupee", defaultTaxBps: 500 },
 });
 
 const settle: SettleDeltaInput = {
@@ -62,10 +62,12 @@ describe("settle delta", () => {
     expect((d.cash as Record<string, { sales: number }>).t1?.sales).toBe(bill.grandTotalPaise - 10000);
     expect((d.byHour as Record<string, { n: number }>)["14"]?.n).toBe(1);
     const byItem = d.byItem as Record<string, { qty: number; net: number }>;
-    expect(byItem.paneer).toEqual({ qty: 1, net: 20000 });
-    expect(byItem.lime).toEqual({ qty: 2, net: 10000 });
-    expect(netSales(d as Partial<DailyStats>)).toBe(30000);
-    expect(d.chargesPaise).toBe(1000);
+    // Net = value before GST. 5% bucket: paneer 200 + packaging 10 = 210 → 200 taxable (19048 + 952);
+    // 18% bucket: 2 × 50 = 100 → 84.74 taxable.
+    expect(byItem.paneer).toEqual({ qty: 1, net: 19048 });
+    expect(byItem.lime).toEqual({ qty: 2, net: 8474 });
+    expect(netSales(d as Partial<DailyStats>)).toBe(27522);
+    expect(d.chargesPaise).toBe(952);
   });
 
   it("settle + cancel nets sales to zero but keeps collected money and records the refund", () => {
@@ -143,7 +145,7 @@ describe("Z report", () => {
     const stats = statsTree(sumDeltas([settleDelta(settle), expenseDelta({ amountPaise: 30000, category: "gas_fuel", paidVia: "drawer", drawerTerminalId: "t1" })]) as Record<string, unknown>) as Partial<DailyStats>;
     const z = zReport({ zNo: 1, businessDate: "2026-09-29", closedAtMs: 0, stats, drawers: [{ terminalId: "t1", openingFloatPaise: 200000, countedPaise: 200000 + (bill.grandTotalPaise - 10000) - 30000 - 100 }], invoiceRanges: [] });
     expect(z.totalPaise).toBe(bill.grandTotalPaise);
-    expect(z.netPaise).toBe(30000);
+    expect(z.netPaise).toBe(27522);
     expect(z.drawers[0]?.expectedPaise).toBe(200000 + bill.grandTotalPaise - 10000 - 30000);
     expect(z.drawers[0]?.variancePaise).toBe(-100);
     const text = receiptText(renderZ(z, { cols: 48, outletName: "Demo Cafe" }), 48);

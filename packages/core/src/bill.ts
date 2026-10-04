@@ -10,7 +10,6 @@ import type {
   OrderLine,
   OrderMode,
   Paise,
-  PriceMode,
   Rounding,
   TaxBucket,
   TaxMode,
@@ -28,7 +27,6 @@ export interface BillLineInput {
 
 export interface BillClientInput {
   taxMode: TaxMode;
-  priceMode: PriceMode;
   rounding: Rounding;
   defaultTaxBps: Bps;
 }
@@ -63,15 +61,17 @@ interface TaxEntry {
  *  - item discount first, then the bill discount is allocated across line nets (largest remainder);
  *  - charges (packaging on configured modes, delivery on delivery orders, service charge only when opted in)
  *    are taxable pseudo-lines at the client's default rate;
- *  - exclusive pricing adds CGST = SGST = round(taxable × rate / 2) per rate bucket;
- *  - inclusive pricing backs the taxable value out of each rate bucket; the ±paise residual goes to round-off;
+ *  - menu prices always include GST: each rate bucket's tax is backed out of its amount
+ *    (CGST = SGST = round(amount × rate / (2 × (1 + rate)))) and the rest is the taxable value,
+ *    so a ₹25 tea at 5% is 23.80 + 0.60 + 0.60 = 25.00 exactly;
+ *  - the opt-in service charge is worked out on the pre-tax value, so GST is added on top of it;
  *  - composition / unregistered → no tax, Bill of Supply;
  *  - rounding "rupee" rounds the grand total half-up to the nearest rupee; the tip is never part of the bill.
  */
 export function computeBill(input: BillInput): BillResult {
   const { client, charges, mode } = input;
   const regular = client.taxMode === "regular";
-  const inclusive = client.priceMode === "inclusive";
+  const inclusive = true;
   const rateFor = (bps: Bps | null) => (regular ? (bps ?? client.defaultTaxBps) : 0);
 
   // 1. Line gross and item discounts.
@@ -125,10 +125,9 @@ export function computeBill(input: BillInput): BillResult {
     buckets.set(k, b);
   }
   const taxesByRate = new Map<Bps, TaxBucket>();
-  let residual = 0;
   for (const b of buckets.values()) {
-    const half = b.bps > 0 ? mulDivRound(b.taxable, b.bps, 20000) : 0;
-    if (b.inclusive) residual += b.amount - (b.taxable + 2 * half);
+    // Inclusive buckets: taxable = amount − 2 × half exactly (see taxableOf), so nothing is left over.
+    const half = b.bps === 0 ? 0 : b.inclusive ? (b.amount - b.taxable) / 2 : mulDivRound(b.taxable, b.bps, 20000);
     const t = taxesByRate.get(b.bps) ?? { bps: b.bps, taxablePaise: 0, cgstPaise: 0, sgstPaise: 0 };
     t.taxablePaise += b.taxable;
     t.cgstPaise += half;
@@ -141,7 +140,7 @@ export function computeBill(input: BillInput): BillResult {
   const taxable = taxes.reduce((s, t) => s + t.taxablePaise, 0);
   const cgst = taxes.reduce((s, t) => s + t.cgstPaise, 0);
   const sgst = taxes.reduce((s, t) => s + t.sgstPaise, 0);
-  const pre = taxable + cgst + sgst + residual;
+  const pre = taxable + cgst + sgst;
   const grand = client.rounding === "rupee" ? roundToRupee(pre) : pre;
   const roundOff = grand - (taxable + cgst + sgst);
 
@@ -182,7 +181,7 @@ export function computeBill(input: BillInput): BillResult {
     roundOffPaise: roundOff,
     grandTotalPaise: grand,
     docType: regular ? "tax_invoice" : "bill_of_supply",
-    priceMode: client.priceMode,
+    priceMode: "inclusive",
   };
   assertBill(result);
   return result;
@@ -190,8 +189,9 @@ export function computeBill(input: BillInput): BillResult {
 
 /**
  * Taxable value per entry key. Exclusive entries are their own amount; inclusive
- * entries back the tax out per rate bucket, then allocate the bucket's taxable
- * value across its entries so the parts sum exactly.
+ * entries back the tax out per rate bucket (half = amount × rate / 2(1 + rate), rounded;
+ * taxable = amount − 2 × half), then allocate the bucket's taxable value across its
+ * entries so the parts sum exactly.
  */
 function taxableOf(entries: TaxEntry[]): Map<string, Paise> {
   const out = new Map<string, Paise>();
@@ -202,7 +202,7 @@ function taxableOf(entries: TaxEntry[]): Map<string, Paise> {
   }
   for (const [bps, group] of inclusiveGroups) {
     const bucket = group.reduce((s, e) => s + e.amount, 0);
-    const taxable = mulDivRound(bucket, 10000, 10000 + bps);
+    const taxable = bucket - 2 * mulDivRound(bucket, bps, 2 * (10000 + bps));
     const parts = allocate(taxable, group.map((e) => e.amount));
     group.forEach((e, i) => out.set(e.key, parts[i] ?? 0));
   }

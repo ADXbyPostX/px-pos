@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ScrollView, View } from "react-native";
-import { bizDateLabel, cashStats, collected, expectedCashFor, formatINR, MODE_LABEL, netSales, np, type OrderMode } from "@px-pos/core";
+import { bizDateLabel, cashStats, collected, expectedCashFor, formatINR, MODE_LABEL, netSales, np, VOID_REASONS, type OrderMode } from "@px-pos/core";
 import { Text } from "@/components/ui/text";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { cn } from "@/lib/utils";
@@ -20,11 +20,12 @@ function Panel({ title, children, className }: { title: string; children: ReactN
   );
 }
 
-function Row({ label, value, strong = false, tone }: { label: string; value: string; strong?: boolean; tone?: "warning" | "success" }) {
+/** `sub` = a breakdown line under the row above it (indented, smaller). */
+function Row({ label, value, strong = false, tone, sub = false }: { label: string; value: string; strong?: boolean; tone?: "warning" | "success"; sub?: boolean }) {
   return (
-    <View className="flex-row items-center justify-between gap-3">
-      <Text className={cn(strong ? "text-lg font-bold" : "text-base text-muted-foreground")}>{label}</Text>
-      <Text className={cn("tabular-nums", strong ? "text-lg font-bold" : "text-base", tone === "warning" && "text-warning", tone === "success" && "text-success")}>{value}</Text>
+    <View className={cn("flex-row items-center justify-between gap-3", sub && "pl-4")}>
+      <Text className={cn(strong ? "text-lg font-bold" : sub ? "text-sm text-muted-foreground" : "text-base text-muted-foreground")}>{label}</Text>
+      <Text className={cn("tabular-nums", strong ? "text-lg font-bold" : sub ? "text-sm text-muted-foreground" : "text-base", tone === "warning" && "text-warning", tone === "success" && "text-success")}>{value}</Text>
     </View>
   );
 }
@@ -54,6 +55,7 @@ export default function Day() {
   const tax = (s?.cgstPaise ?? 0) + (s?.sgstPaise ?? 0);
   const disc = (s?.itemDiscPaise ?? 0) + (s?.billDiscPaise ?? 0);
   const voids = np(s?.voidItems);
+  const voidReasons = Object.entries(s?.voidByReason ?? {}).map(([k, v]) => [VOID_REASONS.find((r) => r.key === k)?.label ?? k, np(v)] as const);
   const modes = Object.entries(s?.byMode ?? {}).map(([k, v]) => [k, np(v)] as const);
   const pays = Object.entries(s?.byPay ?? {});
 
@@ -80,6 +82,9 @@ export default function Day() {
             <Row label="Total billed" value={rs(s?.totalPaise ?? 0)} strong />
             <Row label="Tips" value={rs(s?.tipsPaise ?? 0)} />
             <Row label={`Voided items (${voids.n})`} value={rs(voids.paise)} tone={voids.n ? "warning" : undefined} />
+            {voidReasons.map(([label, v]) => (
+              <Row key={label} label={`${label} (${v.n})`} value={rs(v.paise)} sub />
+            ))}
           </Panel>
           <Panel title="Payments">
             {pays.length === 0 ? <Text className="text-muted-foreground">No payments yet</Text> : pays.map(([k, v]) => <Row key={k} label={PAY_LABEL[k] ?? k} value={rs(v)} />)}

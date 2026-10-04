@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { useGlobalSearchParams, usePathname, type Href } from "expo-router";
 import { Armchair, Bike, CalendarCheck, ChefHat, ReceiptText, Zap } from "lucide-react-native";
-import type { OrderMode } from "@px-pos/core";
+import { kitchenOn, type OrderMode } from "@px-pos/core";
 import { useHeld } from "@/local/held";
 import { useData } from "@/state/data";
 import { usePaired } from "@/state/session";
@@ -15,7 +15,8 @@ export interface TillNavEntry {
 }
 
 /**
- * Till destinations (rail on tablets, tabs on phones): only the order modes the admin enabled.
+ * Till destinations (rail on tablets, tabs on phones): only the order modes the admin enabled,
+ * and Kitchen only while the admin has the kitchen on.
  * The register (/till/order) belongs to whichever mode its order is in.
  */
 export function useTillNav(): TillNavEntry[] {
@@ -33,7 +34,7 @@ export function useTillNav(): TillNavEntry[] {
     ...(client.orderModes.quick ? [{ href: "/till/order?mode=quick" as Href, label: "Quick", Icon: Zap, active: registerMode === "quick", badge: held.length }] : []),
     ...(client.orderModes.delivery ? [{ href: "/till/delivery" as Href, label: "Delivery", Icon: Bike, active: at("/till/delivery") || registerMode === "delivery" }] : []),
     { href: "/till/orders", label: "Orders", Icon: ReceiptText, active: at("/till/orders"), badge: openOrders.length },
-    { href: "/till/kitchen", label: "Kitchen", Icon: ChefHat, active: at("/till/kitchen") },
+    ...(kitchenOn(client) ? [{ href: "/till/kitchen" as Href, label: "Kitchen", Icon: ChefHat, active: at("/till/kitchen") }] : []),
     { href: "/till/day", label: "Day", Icon: CalendarCheck, active: at("/till/day") },
   ];
 }

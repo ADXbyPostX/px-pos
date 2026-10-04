@@ -11,6 +11,7 @@ import {
   quickPlan,
   settlePlan,
   voidLinePlan,
+  voidTicketPlan,
 } from "../src/plans/order";
 import type { OrderRef } from "../src/plans/order";
 import { cashMovePlan, dayOpenPlan, expensePlan, expenseVoidPlan, stockMovePlan, zClosePlan } from "../src/plans/ops";
@@ -23,7 +24,7 @@ let n = 0;
 const ctx: PlanCtx = { cid: "demo", nowMs: Date.parse("2026-09-29T08:35:00Z"), actorId: "s1", actorKind: "staff", terminalId: "t1", source: "app", newId: () => `id${++n}` };
 const tracked = new Set(["paneer"]);
 const supplier = { legalName: "Demo", fssai: "12345678901234", address: "x", stateName: "Maharashtra", stateCode: "27", gstin: "27AAPFU0939F1ZV" };
-const client = { taxMode: "regular" as const, priceMode: "exclusive" as const, rounding: "rupee" as const, defaultTaxBps: 500 };
+const client = { taxMode: "regular" as const, rounding: "rupee" as const, defaultTaxBps: 500 };
 
 const line = (id: string, itemId: string, qty: number, extra: Partial<OrderLine> = {}): OrderLine => ({
   lineId: id,
@@ -95,6 +96,27 @@ describe("order plans honour exactly-once", () => {
     expect(p.postingKey).toBe("kot:o1-1-17");
   });
 
+  it("void ticket: kept as a cancelled order, counted in the day's voids, no sales or stock", () => {
+    const p = voidTicketPlan(ctx, {
+      create: { id: "t9", orderNo: "1-009", mode: "quick", businessDate: "2026-09-29" },
+      lines: [line("a", "paneer", 2), line("b", "lime", 1, { unitPricePaise: 5000 })],
+      reason: "customer_changed",
+    });
+    expectExactlyOnce(p);
+    expect(p.postingKey).toBe("tvoid:t9");
+    const order = p.ops.find((o) => o.path === "clients/demo/orders/t9")?.data;
+    expect(order).toMatchObject({ status: "cancelled", orderNo: "1-009", terminalId: "t1", cancel: { reason: "customer_changed", by: "s1", prepared: false } });
+    expect((order?.lines as Record<string, OrderLine>).a).toMatchObject({ qty: 2, voidedQty: 2, sentQty: 0 });
+    const stats = p.ops.find((o) => o.path.includes("/dailyStats/"))?.data as Record<string, unknown>;
+    expect(stats.voidItems).toEqual({ n: { $inc: 3 }, paise: { $inc: 45000 } });
+    expect(stats.voidByReason).toEqual({ customer_changed: { n: { $inc: 3 }, paise: { $inc: 45000 } } });
+    expect(stats.byStaff).toEqual({ s1: { voids: { $inc: 3 } } });
+    expect(stats.totalPaise).toBeUndefined();
+    expect(stats.orders).toBeUndefined();
+    expect(p.ops.some((o) => o.path.includes("/stock/") || o.path.includes("/kots/") || o.path.includes("/invoices/"))).toBe(false);
+    expect(() => voidTicketPlan(ctx, { create: { id: "t0", orderNo: "1-010", mode: "quick", businessDate: "2026-09-29" }, lines: [], reason: "other" })).toThrow();
+  });
+
   it("kot add-on updates lines with dotted paths", () => {
     const p = kotPlan(ctx, { order: order("open", [line("a", "paneer", 2, { sentQty: 2 })]), lines: [line("c", "paneer", 1, { seq: 2 })], alloc: { numbers: [19], terminalCode: "1" }, tracked });
     const upd = p.ops.find((o) => o.path === "clients/demo/orders/o1");
@@ -118,7 +140,7 @@ describe("order plans honour exactly-once", () => {
     expect(p.postingKey).toBe("settle:o1");
     expect(p.ops.filter((o) => o.path.includes("/payments/"))).toHaveLength(2);
     const stats = p.ops.find((o) => o.path.includes("/dailyStats/"))?.data;
-    expect(stats?.totalPaise).toEqual({ $inc: 21000 });
+    expect(stats?.totalPaise).toEqual({ $inc: 20000 }); // ₹200 menu price, GST inside it
   });
 
   it("quick order is one batch with one posting", () => {
@@ -166,7 +188,7 @@ describe("order plans honour exactly-once", () => {
     expect(p.ops.filter((o) => o.path.includes("/payments/o1_r"))).toHaveLength(2);
     expect(p.ops.find((o) => o.path.includes("/invoices/"))?.data.status).toBe("cancelled");
     const stats = p.ops.find((o) => o.path.includes("/dailyStats/"))?.data as Record<string, unknown>;
-    expect(stats.totalPaise).toEqual({ $inc: -21000 });
+    expect(stats.totalPaise).toEqual({ $inc: -20000 });
     expect(stats.byPay).toBeUndefined();
   });
 

@@ -56,6 +56,7 @@ interface PosHardwareNative {
   customerDisplayShow(lines: DisplayLine[]): boolean;
   customerDisplayShowQr(qr: string[], lines: DisplayLine[]): boolean;
   customerDisplayTest(lines: DisplayLine[]): Promise<CustomerDisplayTest>;
+  pbkdf2Sha256(password: string, saltB64: string, iterations: number): Promise<string>;
 }
 
 /** Null on builds/platforms without the module (iOS, older dev builds): callers fall back. */
@@ -77,6 +78,12 @@ export function printUsb(bytes: Uint8Array): Promise<void> {
 export function usbPrinterStatus(): Promise<UsbPrinterStatus> {
   if (!Native) return Promise.reject(new Error("This build can't use USB printers"));
   return Native.usbPrinterStatus();
+}
+
+/** PBKDF2-HMAC-SHA256 (32-byte key, base64) for till PINs, computed natively off the JS thread. */
+export function pbkdf2Sha256(password: string, saltB64: string, iterations: number): Promise<string> {
+  if (!Native) return Promise.reject(new Error("This build can't check PINs"));
+  return Native.pbkdf2Sha256(password, saltB64, iterations);
 }
 
 /** Pulse the cash drawer wired to the printer board. */

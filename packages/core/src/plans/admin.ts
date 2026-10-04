@@ -1,5 +1,6 @@
 import type { PhotoInput } from "../menu-photos";
 import { paths, postingKey } from "../paths";
+import { adminStaffId } from "../pin";
 import { stockMoveDelta } from "../stats";
 import type { BizDate, Category, Client, Floor, Item, PlatformRole, Staff, Table } from "../types";
 import { auditOp, changedKeys, meta, pick, postingOps } from "./common";
@@ -12,9 +13,9 @@ export function defaultClientSettings(): Omit<Client, keyof ReturnType<typeof me
     status: "active",
     taxMode: "regular",
     defaultTaxBps: 500,
-    priceMode: "exclusive",
     rounding: "rupee",
     orderModes: { dineIn: true, quick: true, delivery: false },
+    kitchen: { enabled: true, printKots: true },
     modeOpts: { dineIn: { askCovers: true, backToTables: true }, quick: { payFirst: true }, delivery: { defaultPrepaid: false } },
     charges: { packagingPaise: 0, packagingOn: ["quick", "delivery"], deliveryPaise: 0, serviceChargeBps: 0 },
     day: { cutoffMin: 240 },
@@ -24,7 +25,6 @@ export function defaultClientSettings(): Omit<Client, keyof ReturnType<typeof me
     receipt: { header: [], footer: ["Thank you! Visit again."], showSac: true },
     kds: { warnMin: 10, lateMin: 20 },
     stockAutoOff: true,
-    requirePin: false,
     lastZNo: 0,
   };
 }
@@ -65,22 +65,69 @@ export function updateClientPlan(ctx: PlanCtx, before: Client, patch: Partial<Cl
   };
 }
 
-/** Super admin: set which admins manage a client. */
-export function assignAdminsPlan(ctx: PlanCtx, clientName: string, before: string[], after: string[]): WritePlan {
+/** A platform admin as their till sign-in needs them. */
+export interface AdminPerson {
+  uid: string;
+  name: string;
+  active: boolean;
+  pinHash?: string;
+}
+
+/**
+ * The staff entry that lets an admin sign in on a client's tills (role owner, labelled Admin).
+ * It exists only once the admin has a PIN, so an admin without one gets no write here; after
+ * that it's merged (created or updated) and switched off when they're unassigned or deactivated.
+ */
+export function adminStaffOp(ctx: PlanCtx, a: AdminPerson, assigned: boolean): PlanOp | null {
+  if (!a.pinHash) return null;
+  return {
+    path: paths.doc(ctx.cid, "staff", adminStaffId(a.uid)),
+    op: "merge",
+    data: { ...meta(ctx), name: a.name, role: "owner", adminUid: a.uid, pinHash: a.pinHash, active: assigned && a.active },
+  };
+}
+
+/** Super admin: set which admins manage a client (their till sign-in follows). */
+export function assignAdminsPlan(ctx: PlanCtx, clientName: string, before: string[], after: string[], people: AdminPerson[] = []): WritePlan {
+  const next = [...new Set(after)].sort();
+  const changed = [...next.filter((u) => !before.includes(u)), ...before.filter((u) => !next.includes(u))];
+  const staffOps = changed.flatMap((uid) => {
+    const a = people.find((p) => p.uid === uid);
+    const op = a ? adminStaffOp(ctx, a, next.includes(uid)) : null;
+    return op ? [op] : [];
+  });
   return {
     label: `Assign admins · ${clientName}`,
     ops: [
-      { path: paths.client(ctx.cid), op: "update", data: { adminUids: [...new Set(after)].sort(), updatedAtMs: ctx.nowMs } },
+      { path: paths.client(ctx.cid), op: "update", data: { adminUids: next, updatedAtMs: ctx.nowMs } },
+      ...staffOps,
       auditOp(ctx, { action: "client.admins", target: { type: "client", id: ctx.cid, label: clientName }, before, after }),
     ],
     primaryPath: paths.client(ctx.cid),
   };
 }
 
-export function platformUserPlan(i: { uid: string; role: PlatformRole; name: string; email?: string; active: boolean; nowMs: number; create: boolean }): WritePlan {
+/**
+ * Keep an admin's till sign-in in step after a change on the Admins page: a new PIN (also
+ * stored on platformUsers so a later assignment can copy it), or being switched on/off.
+ * `assigned` = one ctx per client the admin manages.
+ */
+export function adminTillPlan(nowMs: number, a: AdminPerson, assigned: PlanCtx[], change: "pin" | "status"): WritePlan {
+  const ops: PlanOp[] = [];
+  if (change === "pin") ops.push({ path: paths.platformUser(a.uid), op: "update", data: { pinHash: a.pinHash, updatedAtMs: nowMs } });
+  for (const ctx of assigned) {
+    const op = adminStaffOp(ctx, a, true);
+    if (!op) continue;
+    ops.push(op);
+    if (change === "pin") ops.push(auditOp(ctx, { action: "staff.pin", target: { type: "staff", id: adminStaffId(a.uid), label: a.name } }));
+  }
+  return { label: change === "pin" ? `Till PIN for ${a.name}` : `Till sign-in for ${a.name}`, ops, primaryPath: paths.platformUser(a.uid) };
+}
+
+export function platformUserPlan(i: { uid: string; role: PlatformRole; name: string; email?: string; active: boolean; nowMs: number; create: boolean; pinHash?: string }): WritePlan {
   const path = paths.platformUser(i.uid);
   const data = i.create
-    ? { ...meta({ nowMs: i.nowMs, source: "admin" }), role: i.role, name: i.name, ...(i.email ? { email: i.email } : {}), active: i.active }
+    ? { ...meta({ nowMs: i.nowMs, source: "admin" }), role: i.role, name: i.name, ...(i.email ? { email: i.email } : {}), active: i.active, ...(i.pinHash ? { pinHash: i.pinHash } : {}) }
     : { role: i.role, name: i.name, email: i.email ?? del(), active: i.active, updatedAtMs: i.nowMs };
   return { label: `${i.create ? "Add" : "Update"} ${i.name}`, ops: [{ path, op: i.create ? "set" : "update", data }], primaryPath: path };
 }
@@ -208,13 +255,20 @@ export function bulkTablesPlan(ctx: PlanCtx, i: { floorId: string; prefix: strin
 
 // ─── staff ──────────────────────────────────────────────────────────────────
 
-export function upsertStaffPlan(ctx: PlanCtx, id: string, s: Pick<Staff, "name" | "role" | "active"> & Partial<Pick<Staff, "phone" | "discountCapBps">>, before?: Staff): WritePlan {
+/** Add or edit a staff member. A new `pinHash` replaces their till PIN (the audit says so, without the hash). */
+export function upsertStaffPlan(ctx: PlanCtx, id: string, s: Pick<Staff, "name" | "role" | "active"> & Partial<Pick<Staff, "phone" | "discountCapBps" | "pinHash">>, before?: Staff): WritePlan {
   const path = paths.doc(ctx.cid, "staff", id);
+  const pinChanged = Boolean(s.pinHash && s.pinHash !== before?.pinHash);
   return {
     label: `${before ? "Update" : "Add"} ${s.name}`,
     ops: [
       { path, op: before ? "update" : "set", data: before ? { ...s, updatedAtMs: ctx.nowMs } : { ...meta(ctx), ...s } },
-      auditOp(ctx, { action: before ? "staff.update" : "staff.create", target: { type: "staff", id, label: s.name }, ...(before ? { before: { role: before.role, active: before.active } } : {}), after: { role: s.role, active: s.active } }),
+      auditOp(ctx, {
+        action: before ? "staff.update" : "staff.create",
+        target: { type: "staff", id, label: s.name },
+        ...(before ? { before: { role: before.role, active: before.active } } : {}),
+        after: { role: s.role, active: s.active, ...(pinChanged ? { pin: before?.pinHash ? "changed" : "set" } : {}) },
+      }),
     ],
     primaryPath: path,
   };

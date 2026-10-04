@@ -196,8 +196,6 @@ export function demoSeedPlans(ctxFor: (cid: string) => PlanCtx, ids: () => strin
       fssai: "11524999000456",
       taxMode: "regular",
       defaultTaxBps: 500,
-      // Menu boards at a tea room quote the price you pay: GST is backed out of it.
-      priceMode: "inclusive",
       rounding: "rupee",
       invoicePrefix: "DT",
       adminUids: [demoAdminId],

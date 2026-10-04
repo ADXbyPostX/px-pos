@@ -1,7 +1,7 @@
 import { diffKot, orderWhere } from "../kot";
 import { kotDocId, formatKotNo } from "../numbering";
 import { paths, postingKey, phone10 } from "../paths";
-import { cancelBillDelta, kotDelta, quickDelta, settleDelta, voidDelta } from "../stats";
+import { cancelBillDelta, kotDelta, quickDelta, settleDelta, ticketVoidDelta, voidDelta } from "../stats";
 import type { SettleDeltaInput } from "../stats";
 import type { AppliedTender } from "../tenders";
 import type {
@@ -13,6 +13,7 @@ import type {
   Fy,
   InvoiceLine,
   KotItem,
+  LineVoid,
   Order,
   OrderCustomer,
   OrderDelivery,
@@ -63,7 +64,8 @@ function buildKots(ctx: PlanCtx, orderId: string, lines: OrderLine[], alloc: Kot
   });
 }
 
-function kotDocOps(ctx: PlanCtx, o: OrderRef, kots: BuiltKot[], kind: "new" | "addon", covers?: number): PlanOp[] {
+/** With the kitchen off, KOTs are still recorded (stock, reports) but born served, so no screen waits on them. */
+function kotDocOps(ctx: PlanCtx, o: OrderRef, kots: BuiltKot[], kind: "new" | "addon", covers?: number, kitchen = true): PlanOp[] {
   return kots.map((k) => ({
     path: k.path,
     op: "set" as const,
@@ -81,8 +83,8 @@ function kotDocOps(ctx: PlanCtx, o: OrderRef, kots: BuiltKot[], kind: "new" | "a
       station: k.station,
       items: k.items,
       staffId: ctx.actorId,
-      status: "new",
-      statusAtMs: { new: ctx.nowMs },
+      status: kitchen ? "new" : "served",
+      statusAtMs: kitchen ? { new: ctx.nowMs } : { new: ctx.nowMs, served: ctx.nowMs },
       reprints: 0,
       ...(covers ? { covers } : {}),
     },
@@ -143,6 +145,8 @@ export interface KotPlanInput {
   tracked: ReadonlySet<string>;
   /** Items to switch off in the same batch (stockAutoOff and this send empties them). */
   autoOff?: string[];
+  /** false when the client's kitchen is off (kitchenOn): the KOTs are recorded as served. */
+  kitchen?: boolean;
 }
 
 export interface KotPlanResult extends WritePlan {
@@ -180,7 +184,7 @@ export function kotPlan(ctx: PlanCtx, i: KotPlanInput): KotPlanResult {
     for (const l of sent) upd[`lines.${l.lineId}`] = l;
     ops.push({ path: paths.order(ctx.cid, o.id), op: "update", data: upd });
   }
-  ops.push(...kotDocOps(ctx, o, kots, kind, o.covers));
+  ops.push(...kotDocOps(ctx, o, kots, kind, o.covers, i.kitchen ?? true));
 
   const first = kots[0] as BuiltKot;
   const key = postingKey.kot(first.id);
@@ -435,6 +439,8 @@ export interface QuickPlanInput {
   tracked: ReadonlySet<string>;
   serviceChargeOptIn?: boolean;
   customer?: OrderCustomer;
+  /** false when the client's kitchen is off (kitchenOn): the KOTs are recorded as served. */
+  kitchen?: boolean;
 }
 
 export interface QuickPlanResult extends WritePlan {
@@ -476,7 +482,7 @@ export function quickPlan(ctx: PlanCtx, i: QuickPlanInput): QuickPlanResult {
   );
   const ops: PlanOp[] = [
     { path: paths.order(ctx.cid, id), op: "set", data: doc },
-    ...kotDocOps(ctx, o, kots, "new", i.create.covers),
+    ...kotDocOps(ctx, o, kots, "new", i.create.covers, i.kitchen ?? true),
     { path: paths.invoice(ctx.cid, i.invoice.invoiceId), op: "set", data: invoiceDoc(ctx, o, { bill: i.bill, lines: i.invoiceLines, invoice: i.invoice, supplier: i.supplier, docType: i.docType, ...(i.buyer ? { buyer: i.buyer } : {}) }) },
     terminalSeqOp(ctx, i.invoice),
     ...paymentOps(ctx, o, i.invoice.invoiceId, i.applied, i.tipPaise, "payment"),
@@ -485,6 +491,45 @@ export function quickPlan(ctx: PlanCtx, i: QuickPlanInput): QuickPlanResult {
   const c = customerOp(ctx, i.customer ?? i.create.customer);
   if (c) ops.push(c);
   return { label: `Quick ${i.invoice.invoiceNo} · ${where(o)}`, ops, postingKey: key, primaryPath: paths.posting(ctx.cid, key), kots, orderId: id };
+}
+
+// ─── void a whole ticket (nothing sent or paid) ─────────────────────────────
+
+export interface VoidTicketInput {
+  /** A fresh order number for the record (no token: nobody is called for it). */
+  create: NewOrderInput;
+  lines: OrderLine[];
+  reason: string;
+}
+
+/**
+ * Void a ticket nobody sent to the kitchen or paid for. It's kept as a cancelled order (what,
+ * who, why, when) and counted in the day's voids; nothing was made, so stock is untouched and
+ * there are no sales. One posting key per ticket, so a replay can't count it twice.
+ */
+export function voidTicketPlan(ctx: PlanCtx, i: VoidTicketInput): WritePlan {
+  const lines = i.lines.filter((l) => l.qty > 0);
+  if (lines.length === 0) throw new Error("voidTicketPlan: nothing to void");
+  const qty = lines.reduce((s, l) => s + l.qty, 0);
+  const amountPaise = lines.reduce((s, l) => s + l.unitPricePaise * l.qty, 0);
+  const entry: LineVoid = { qty: 0, reason: i.reason, prepared: false, by: ctx.actorId, atMs: ctx.nowMs };
+  const doc = {
+    ...newOrderDoc(ctx, i.create),
+    status: "cancelled",
+    lines: Object.fromEntries(lines.map((l) => [l.lineId, { ...l, voidedQty: l.qty, voids: [{ ...entry, qty: l.qty }] }])),
+    cancel: { reason: i.reason, by: ctx.actorId, prepared: false, atMs: ctx.nowMs },
+  };
+  const key = postingKey.ticketVoid(i.create.id);
+  return {
+    label: `Void ${i.create.orderNo} · ${qty} item${qty === 1 ? "" : "s"}`,
+    ops: [
+      { path: paths.order(ctx.cid, i.create.id), op: "set", data: doc },
+      ...postingOps(ctx, { key, kind: "ticket_void", businessDate: i.create.businessDate, refId: i.create.id, stats: ticketVoidDelta({ qty, amountPaise, reason: i.reason, staffId: ctx.actorId }) }),
+      auditOp(ctx, { action: "order.void", target: { type: "order", id: i.create.id, label: i.create.orderNo }, after: { items: qty, amountPaise }, reason: i.reason }),
+    ],
+    postingKey: key,
+    primaryPath: paths.posting(ctx.cid, key),
+  };
 }
 
 // ─── void a sent line ───────────────────────────────────────────────────────
@@ -498,6 +543,8 @@ export interface VoidLineInput {
   approver?: { id: string; name?: string };
   alloc: KotAlloc;
   tracked: ReadonlySet<string>;
+  /** false when the client's kitchen is off: the cancel KOT is recorded as served. */
+  kitchen?: boolean;
 }
 
 /** Void sent units of a line: cancel KOT to the kitchen, stock back (or wasted), audit. */
@@ -554,8 +601,8 @@ export function voidLinePlan(ctx: PlanCtx, i: VoidLineInput): WritePlan & { kot:
         station: kot.station,
         items: kot.items,
         staffId: ctx.actorId,
-        status: "new",
-        statusAtMs: { new: ctx.nowMs },
+        status: i.kitchen === false ? "served" : "new",
+        statusAtMs: i.kitchen === false ? { new: ctx.nowMs, served: ctx.nowMs } : { new: ctx.nowMs },
         reprints: 0,
         reason: i.reason,
       },

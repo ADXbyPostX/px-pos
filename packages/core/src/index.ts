@@ -20,6 +20,7 @@ export * from "./validate";
 export * from "./menu-import";
 export * from "./menu-photos";
 export * from "./upi";
+export * from "./pin";
 export * from "./plans/types";
 export * from "./plans/common";
 export * from "./plans/order";

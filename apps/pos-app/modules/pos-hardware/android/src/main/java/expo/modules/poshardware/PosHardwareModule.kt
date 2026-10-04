@@ -11,6 +11,7 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.util.Base64
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -43,6 +44,8 @@ class PosHardwareModule : Module() {
   private val usb: UsbManager
     get() = context.getSystemService(Context.USB_SERVICE) as UsbManager
   private val jobs = Executors.newSingleThreadExecutor()
+  // PIN checks get their own thread so a sign-in never waits behind a print job.
+  private val crypto = Executors.newSingleThreadExecutor()
   private val display = CustomerDisplay()
 
   override fun definition() = ModuleDefinition {
@@ -78,6 +81,18 @@ class PosHardwareModule : Module() {
           } catch (e: Exception) {
             promise.reject("E_STATUS", e.message ?: "Could not read the printer status", e)
           }
+        }
+      }
+    }
+
+    /** PBKDF2-HMAC-SHA256, 32-byte key, base64 in and out: the till PIN hash (see PinHash). */
+    AsyncFunction("pbkdf2Sha256") { password: String, saltB64: String, iterations: Int, promise: Promise ->
+      crypto.execute {
+        try {
+          val key = PinHash.pbkdf2Sha256(password.toByteArray(Charsets.UTF_8), Base64.decode(saltB64, Base64.DEFAULT), iterations)
+          promise.resolve(Base64.encodeToString(key, Base64.NO_WRAP))
+        } catch (e: Exception) {
+          promise.reject("E_PIN_HASH", e.message ?: "Couldn't check the PIN", e)
         }
       }
     }

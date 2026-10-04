@@ -187,6 +187,15 @@ export interface VoidDeltaInput {
   tracked: boolean;
 }
 
+/** A whole ticket voided before anything was sent or paid: counted as voids, no sales, no stock. */
+export function ticketVoidDelta(v: { qty: number; amountPaise: Paise; reason: string; staffId: string }): StatsDelta {
+  return {
+    voidItems: { n: v.qty, paise: v.amountPaise },
+    voidByReason: { [v.reason]: { n: v.qty, paise: v.amountPaise } },
+    byStaff: { [v.staffId]: { voids: v.qty } },
+  };
+}
+
 /** Void of sent units: informational counters + stock returned (not prepared) or wasted (prepared). */
 export function voidDelta(v: VoidDeltaInput): StockDeltaResult {
   const stats: StatsDelta = {

@@ -1,4 +1,4 @@
-import { renderInvoice, renderKot, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal } from "@px-pos/core";
+import { printsKots, renderInvoice, renderKot, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal } from "@px-pos/core";
 import { encodeReceipt } from "./encode";
 import { builtInPrinter, lanPrinter, type PrinterTransport } from "./transport";
 
@@ -30,7 +30,9 @@ export async function printInvoice(terminal: Terminal, client: Client, inv: Invo
   }
 }
 
-export async function printKots(terminal: Terminal, kots: KotPrint[]): Promise<string | null> {
+/** KOT tickets, unless the outlet's kitchen or its KOT printing is off (admin › Order modes). */
+export async function printKots(terminal: Terminal, client: Pick<Client, "kitchen">, kots: KotPrint[]): Promise<string | null> {
+  if (!printsKots(client)) return null;
   const r = route(terminal.printers?.kot ?? terminal.printers?.receipt);
   if (!r || kots.length === 0) return null;
   try {

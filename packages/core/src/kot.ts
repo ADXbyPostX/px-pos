@@ -1,4 +1,14 @@
-import type { KotItem, KotKind, Order, OrderLine, OrderMode, Station } from "./types";
+import type { Client, KotItem, KotKind, Order, OrderLine, OrderMode, Station } from "./types";
+
+/** The Kitchen screen and KOT flow, unless the admin turned the kitchen off (Order modes). */
+export function kitchenOn(c: Pick<Client, "kitchen">): boolean {
+  return c.kitchen?.enabled !== false;
+}
+
+/** KOT tickets print only while the kitchen is on and their printing hasn't been turned off. */
+export function printsKots(c: Pick<Client, "kitchen">): boolean {
+  return kitchenOn(c) && c.kitchen?.printKots !== false;
+}
 
 /** Units of a line not yet sent to the kitchen. */
 export function pendingQty(line: Pick<OrderLine, "qty" | "sentQty">): number {
@@ -109,6 +119,11 @@ export const CANCEL_REASONS = [
   { key: "merged", label: "Merged into another order" },
   { key: "other", label: "Other" },
 ] as const;
+
+/** Label for a stored void/cancel reason key ("customer_changed" → "Customer changed mind"); free text passes through. */
+export function reasonLabel(key: string): string {
+  return [...VOID_REASONS, ...CANCEL_REASONS].find((r) => r.key === key)?.label ?? key;
+}
 
 export const DISCOUNT_REASONS = [
   { key: "regular", label: "Regular customer" },

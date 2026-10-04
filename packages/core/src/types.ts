@@ -24,6 +24,7 @@ export const STAFF_ROLES = ["owner", "manager", "cashier", "captain", "kitchen"]
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export type TaxMode = "regular" | "composition" | "unregistered";
+/** Menu prices always include GST now; "exclusive" survives only on bills saved before that. */
 export type PriceMode = "exclusive" | "inclusive";
 export type Rounding = "rupee" | "none";
 export type FoodType = "veg" | "nonveg" | "egg";
@@ -50,6 +51,8 @@ export interface PlatformUser extends Meta {
   name: string;
   email?: string;
   active: boolean;
+  /** Till PIN (formatPinHash). Copied to a staff entry in every client the admin is assigned to. */
+  pinHash?: string;
 }
 
 export interface Bootstrap {
@@ -84,6 +87,13 @@ export interface ModeOptions {
   dineIn: { askCovers: boolean; backToTables: boolean };
   quick: { payFirst: boolean };
   delivery: { defaultPrepaid: boolean };
+}
+
+export interface KitchenOptions {
+  /** Off: no Kitchen screen in the app; KOTs are still recorded (stock, reports) but already served. */
+  enabled: boolean;
+  /** Print a KOT ticket for each order (only while the kitchen is on). */
+  printKots: boolean;
 }
 
 export interface Charges {
@@ -123,9 +133,10 @@ export interface Client extends Meta {
   status: "active" | "suspended";
   taxMode: TaxMode;
   defaultTaxBps: Bps;
-  priceMode: PriceMode;
   rounding: Rounding;
   orderModes: ModeFlags;
+  /** Kitchen screen + KOT tickets. Missing on older clients = on (see kitchenOn / printsKots). */
+  kitchen?: KitchenOptions;
   modeOpts: ModeOptions;
   charges: Charges;
   day: { cutoffMin: number };
@@ -136,7 +147,6 @@ export interface Client extends Meta {
   receipt: { header: string[]; footer: string[]; showSac: boolean };
   kds: { warnMin: number; lateMin: number };
   stockAutoOff: boolean;
-  requirePin: boolean;
   lastZNo: number;
   /** Where UPI payments go; the till shows a QR with the amount when set. */
   upi?: UpiAccount;
@@ -192,8 +202,13 @@ export interface Staff extends Meta {
   phone?: string;
   discountCapBps?: Bps;
   active: boolean;
-  /** Phase 2 (salted PBKDF2). Not a security boundary in phase 1. */
+  /**
+   * Till sign-in PIN (formatPinHash: salted PBKDF2-SHA256), checked on the terminal so it works
+   * offline. Keeps one person from working as another; it is not a security boundary.
+   */
   pinHash?: string;
+  /** Set on the staff entry that stands for a platform admin assigned to this client (adminStaffId). */
+  adminUid?: string;
 }
 
 export interface Category extends Meta {
@@ -707,6 +722,7 @@ export type PostingKind =
   | "quick"
   | "settle"
   | "line_void"
+  | "ticket_void"
   | "cancel_bill"
   | "expense"
   | "expense_void"

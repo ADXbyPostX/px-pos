@@ -168,7 +168,9 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   out.push(rule());
 
   const b = inv.bill;
-  out.push(t(lr(`Subtotal (${b.itemQty} items)`, money(b.grossPaise), cols)));
+  // Prices include GST (bills saved before that rule say "exclusive" and keep the old wording).
+  const incl = b.priceMode !== "exclusive" && inv.docType === "tax_invoice";
+  out.push(t(lr(incl ? `Items (${b.itemQty}) incl. GST` : `Subtotal (${b.itemQty} items)`, money(b.grossPaise), cols)));
   if (b.itemDiscPaise) out.push(t(lr("Item discounts", `-${money(b.itemDiscPaise)}`, cols)));
   if (b.billDiscPaise) out.push(t(lr("Bill discount", `-${money(b.billDiscPaise)}`, cols)));
   for (const c of b.charges) {

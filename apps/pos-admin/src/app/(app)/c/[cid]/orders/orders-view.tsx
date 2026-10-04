@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { collection, limit, orderBy, query, where, type Firestore } from "firebase/firestore";
 import { Receipt } from "lucide-react";
-import { activeQty, billForLines, halfRateLabel, MODE_LABEL, orderWhere, paths, type BillResult, type Order, type OrderMode, type Payment, type Staff, type Terminal } from "@px-pos/core";
+import { activeQty, billForLines, halfRateLabel, MODE_LABEL, orderWhere, paths, reasonLabel, type BillResult, type Order, type OrderMode, type Payment, type Staff, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { SelectField } from "@/components/shared/form-controls";
@@ -97,7 +97,7 @@ function OrderDetail({ order, cid, staffName, terminalName }: { order: Row; cid:
                     {l.variantName ? ` (${l.variantName})` : ""}
                   </span>
                   {l.note ? <span className="block text-xs text-muted-foreground">{l.note}</span> : null}
-                  {l.voidedQty ? <span className="block text-xs text-warning">{l.voidedQty} voided{l.voids?.[0]?.reason ? ` · ${l.voids[0].reason}` : ""}</span> : null}
+                  {l.voidedQty ? <span className="block text-xs text-warning">{l.voidedQty} voided{l.voids?.[0]?.reason ? ` · ${reasonLabel(l.voids[0].reason)}` : ""}</span> : null}
                   {l.sentQty < l.qty ? <span className="block text-xs text-muted-foreground">{l.qty - l.sentQty} not sent to kitchen</span> : null}
                 </span>
                 <Money value={l.unitPricePaise * q} className="shrink-0" />
@@ -136,11 +136,11 @@ function OrderDetail({ order, cid, staffName, terminalName }: { order: Row; cid:
         <Panel title="Cancelled" bodyClassName="p-4">
           <KV
             items={[
-              { label: "Reason", value: order.cancel.reason },
+              { label: "Reason", value: reasonLabel(order.cancel.reason) },
               ...(order.cancel.note ? [{ label: "Note", value: order.cancel.note }] : []),
               { label: "By", value: staffName(order.cancel.by) },
               ...(order.cancel.approvedBy ? [{ label: "Approved by", value: staffName(order.cancel.approvedBy) }] : []),
-              { label: "Food prepared", value: order.cancel.prepared ? "Yes (wastage)" : "No (back to stock)" },
+              { label: "Food prepared", value: order.kotCount === 0 ? "No (voided before it was sent)" : order.cancel.prepared ? "Yes (wastage)" : "No (back to stock)" },
               { label: "When", value: fmtDateTime(order.cancel.atMs) },
             ]}
           />

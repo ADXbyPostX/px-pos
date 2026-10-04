@@ -19,9 +19,10 @@
 ## Roles (who uses what)
 
 - **Super admin** (Mandy) — god mode over every client. pos-admin only.
-- **Admin** — sees/manages only clients whose `adminUids` contains them. pos-admin only.
+- **Admin** — sees/manages only clients whose `adminUids` contains them. Signs in to pos-admin with email/password, and on their clients' tills with a PIN.
 - **Client owner** and **employees** (manager / cashier / captain / kitchen) — pos-app only.
-- **Phase 1 = no login screens.** Anonymous Firebase Auth everywhere; access comes from Firestore docs (`platformUsers/{uid}`, `clients/{c}/members/{uid}`). Terminals pair by on-screen code. Super admin is claimed once at `/setup` and linked to email/password (same uid).
+- **Till sign-in = name + 4–6 digit PIN** (`packages/core/src/pin.ts`). Admins set staff PINs on the Staff page; the super admin sets each admin's PIN on the Admins page. Stored only as `pinHash` (`pbkdf2-sha256$iter$len$salt$hash`: WebCrypto in admin `src/lib/pin.ts`, native `PinHash.kt` in the app) and checked on the terminal, so it works offline. An admin reaches the tills through a mirrored staff entry `staff/adm_{uid}` (role owner, `adminUid`, labelled Admin), kept in step by `assignAdminsPlan` / `adminTillPlan` and only created once they have a PIN. No PIN = can't sign in. Five wrong tries lock that name for 30 s.
+- **No Firebase sign-in on terminals.** Anonymous Firebase Auth everywhere; access comes from Firestore docs (`platformUsers/{uid}`, `clients/{c}/members/{uid}`). Terminals pair by on-screen code. Super admin is claimed once at `/setup` and linked to email/password (same uid).
 - Phase 2 adds login without migrating data: admin email login + invites with the **same** uid as the existing `platformUsers` doc; in the app, owner/staff authenticate *inside* the app (PIN / signed grant). **A terminal's Firebase uid never changes** — its offline write queue is keyed to it.
 
 ## Brand
@@ -50,6 +51,7 @@
 
 - Tablet rail + phone bottom tabs come from one hook (`useTillNav`); phones get full-screen ticket/pay views, never side panels.
 - NativeWind gotchas: put `active:` classes **on the Pressable itself**, never on a child View (NativeWind attaches touch handlers to it and the tap never reaches the Pressable). Horizontal `ScrollView`s need `grow-0` or they stretch vertically.
+- **Kitchen switch** (admin › Order modes → Kitchen, `client.kitchen`, missing = on; `kitchenOn` / `printsKots`): off hides the Kitchen tab and screen, stops KOT tickets, and relabels "Send KOT" as "Save order". KOT docs are still written (stock, reports) but born `served`.
 - **Hold (park) orders** (`src/local/held.ts`): unsent quick/delivery tickets are SQLite drafts with a `held` marker — terminal-only, offline, never written to Firestore until paid/sent. A ticket left unfinished on screen change is listed too ("not finished"). The held name becomes `customer.name` and prints as "Token 3 - Ravi". Dine-in doesn't hold (the table is the hold).
 - Drive the device by accessibility label (`uiautomator dump` + `input tap`), not pixel guesses — every Pressable needs an `accessibilityLabel`.
 - **Payments** (`pay-panel.tsx`): Cash, UPI, Card and Other are recorded tenders; there's no payment gateway. UPI shows an NPCI `upi://pay` QR with the amount (on screen, and on the customer display when the compact link fits a version-3 QR) once admin › Settings › Payments has the outlet's UPI ID (`client.upi`); the cashier confirms the money arrived (soundbox/app), then completes. Card is charged on the bank's separate card machine. Complete settles with the amount on screen; Split takes part now and the rest another way. The panel never scrolls: the keypad (`Keypad fill`) takes the free height, and phones hide the tab bar while paying.
@@ -62,6 +64,7 @@
 
 - **Deviation from px-ops (deliberate):** admin uses the **client Firebase SDK with live `onSnapshot`** (pXclusive pattern), not server actions + Admin SDK. Terminals write Firestore directly while offline, so **Firestore rules are the security boundary** for both apps. No Admin SDK anywhere in phase 1.
 - **Money is integer paise** (`Paise`), rates are basis points (`Bps`, 500 = 5%). Never floats. Format only with `formatINR` from core (hand-written en-IN grouping, no `Intl` — Hermes-safe).
+- **Menu prices always include GST** (Mandy, 2026-10-05; there's no "+ GST" setting). `computeBill` backs the tax out per rate bucket: CGST = SGST = round(amount × rate / 2(1 + rate)), taxable = the rest, so a ₹25 tea is 23.80 + 0.60 + 0.60 = 25.00 with no round-off. Only the opt-in service charge gets GST on top. Old bills may still say `priceMode: "exclusive"`; client docs may carry a stale `priceMode`/`requirePin` — ignored.
 - **Item photos** live in `itemPhotos/{itemId}` (not on the item): a 400 px square JPEG as base64, ≤ 200 KB, made in the browser (`apps/pos-admin/src/lib/photo.ts`). Inline data works on Spark (no Storage bucket) and reaches terminals through the offline cache. The `data` field is index-exempt, audit entries never carry it, and removing a photo sets `active:false`. Bulk upload matches file names to dish names (`matchPhotoFiles`).
 - **Every item stores its own GST rate** (`taxBps`, required by `validateItem`), picked when it's created — never "outlet default". Slabs are GST 2.0 (`TAX_RATES`: 0/5/18/40%). `null` survives only on legacy items (billed at the outlet default, flagged `*` in admin).
 - **Time**: IST fixed +330 min, no `Intl`. Sales are stamped with the terminal's open business day (`days/{bizDate}`), not the device clock. Invoice date/FY = IST calendar date at issue.
@@ -71,7 +74,7 @@
 - **Never hard-delete.** `active:false` or a `status` (`cancelled`/`void`). Rules deny delete everywhere.
 - Common fields: `schemaVersion`, `createdAtMs` (device), `createdAt` (serverTimestamp), `updatedAtMs`, `source`, `terminalId?`, `staffId?`, `outletId:'main'` on transactional docs.
 - Collection names/paths live in `@px-pos/core` (`paths.ts`) — never hand-type a path.
-- Known phase-1 rule gaps (by design, closed in phase 2): unsettled orders are loosely writable by members; per-role limits are UI + audit only; staff PINs are not a security boundary.
+- Known phase-1 rule gaps (by design, closed in phase 2): unsettled orders are loosely writable by members; per-role limits are UI + audit only; till PINs are not a security boundary (a 4–6 digit hash can be guessed offline by anyone who can read the staff docs).
 
 ## Commands
 
@@ -83,6 +86,9 @@ npm run rules:test                # rules tests on the Firestore emulator (JDK 2
 npm run rules:deploy              # deploy rules + indexes to postx-pos (adxbypostx account) — Mandy runs this herself
 npm run icons                     # render app icons (Inkscape)
 cd apps/pos-app && npx expo run:android   # dev build on emulator/device (JDK 17)
+# Release APK (universal: TVS is 32-bit, phones 64-bit). Gradle doesn't watch packages/core, so after a
+# core-only change delete apps/pos-app/android/app/build/generated/assets/react first or the JS bundle is stale.
+cd apps/pos-app/android && ./gradlew :app:assembleRelease -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
 cd apps/pos-app && npx expo-doctor
 ```
 

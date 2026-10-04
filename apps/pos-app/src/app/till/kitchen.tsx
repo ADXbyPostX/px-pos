@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { kotStatusPlan, minutesSince, STATION_LABEL, type Kot, type KotStatus, type Station } from "@px-pos/core";
+import { Redirect } from "expo-router";
+import { kitchenOn, kotStatusPlan, minutesSince, STATION_LABEL, type Kot, type KotStatus, type Station } from "@px-pos/core";
 import { planCtx } from "@/actions/context";
 import { Text } from "@/components/ui/text";
 import { applyPlan } from "@/firebase/apply-plan";
@@ -14,8 +15,15 @@ import { usePaired } from "@/state/session";
 const NEXT: Record<KotStatus, KotStatus | null> = { new: "preparing", preparing: "ready", ready: "served", served: null };
 const LABEL: Record<KotStatus, string> = { new: "New", preparing: "Preparing", ready: "Ready", served: "Served" };
 
-/** Kitchen display: today's KOTs oldest first; tap a ticket to move it along. */
-export default function Kitchen() {
+/** Kitchen display, only while the admin has the kitchen on (the client doc is live). */
+export default function KitchenScreen() {
+  const { client } = usePaired();
+  if (!kitchenOn(client)) return <Redirect href="/till" />;
+  return <Kitchen />;
+}
+
+/** Today's KOTs oldest first; tap a ticket to move it along. */
+function Kitchen() {
   const session = usePaired();
   const { client } = session;
   const { kots } = useData();

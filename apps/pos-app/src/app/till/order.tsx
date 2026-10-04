@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { CheckCircle2, ChevronRight } from "lucide-react-native";
-import { formatINR, MODE_LABEL, orderWhere, type OrderMode, type Paise, type TenderInput } from "@px-pos/core";
-import { billFor, billOrder, quickCheckout, sendKot, settleOrder, supplierOf, type QuickResult, type Ticket } from "@/actions/orders";
+import { formatINR, kitchenOn, MODE_LABEL, orderWhere, type OrderMode, type Paise, type TenderInput } from "@px-pos/core";
+import { billFor, billOrder, quickCheckout, sendKot, settleOrder, supplierOf, voidTicket, type QuickResult, type Ticket } from "@/actions/orders";
 import { newId } from "@/actions/context";
 import { CategoryRail } from "@/components/pos/register/category-rail";
 import { HeldSheet, HoldButton } from "@/components/pos/register/held-sheet";
@@ -44,6 +44,8 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
   const [notice, setNotice] = useState<string | null>(null);
   const [holdOpen, setHoldOpen] = useState(false);
   const [dropping, setDropping] = useState<"void" | "clear" | null>(null);
+  // A held ticket being discarded goes through the same void sheet (and into the day's voids).
+  const [voidingHeld, setVoidingHeld] = useState<HeldTicket | null>(null);
   const held = useHeld(session.cid);
   const tilePhotos = useTilePhotos();
   // The ticket on screen is never listed as held; once it's left, an unfinished one is.
@@ -82,7 +84,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
         const called = orderWhere(mode, { token: r.token, customer: t.ticket.customer });
         settled = true;
         setDone(r);
-        void printKots(session.terminal, r.kots.map((k) => ({ ...k, kind: "new" as const, mode, where: called, orderNo: r.orderNo, createdAtMs: Date.now(), station: k.station as "kitchen" })));
+        void printKots(session.terminal, session.client, r.kots.map((k) => ({ ...k, kind: "new" as const, mode, where: called, orderNo: r.orderNo, createdAtMs: Date.now(), station: k.station as "kitchen" })));
         void printInvoice(session.terminal, session.client, {
           invoiceNo: r.invoiceNo,
           issuedAtMs: Date.now(),
@@ -116,7 +118,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
     try {
       const row = sendKot(deps, t.ticket, order);
       const r = row.result!;
-      void printKots(session.terminal, r.kots.map((k) => ({ ...k, kind: order ? ("addon" as const) : ("new" as const), mode, where, orderNo: r.orderNo, createdAtMs: Date.now(), station: k.station as "kitchen", ...(t.ticket.covers ? { covers: t.ticket.covers } : {}) }))).then((err) => err && setNotice(`Printer: ${err}`));
+      void printKots(session.terminal, session.client, r.kots.map((k) => ({ ...k, kind: order ? ("addon" as const) : ("new" as const), mode, where, orderNo: r.orderNo, createdAtMs: Date.now(), station: k.station as "kitchen", ...(t.ticket.covers ? { covers: t.ticket.covers } : {}) }))).then((err) => err && setNotice(`Printer: ${err}`));
       t.sent(r.orderId);
       if (mode === "dineIn" && session.client.modeOpts.dineIn.backToTables) router.replace("/till/tables");
     } catch (e) {
@@ -150,16 +152,25 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
       totalOf={heldTotal}
       onHold={hold}
       onResume={resume}
-      onDiscard={(h) => discardHeld(h.id)}
+      onDiscard={(h) => {
+        setHoldOpen(false);
+        setVoidingHeld(h);
+      }}
     />
   );
   const holdButton = canHold && (hasNew || held.length > 0) ? <HoldButton count={held.length} onPress={() => setHoldOpen(true)} /> : null;
 
   // ── Void: drop an order nobody has sent to the kitchen or paid for ─────────────────────
+  // Recorded as a cancelled order with the reason, so it shows in the day's voids.
   const canVoid = !order && hasNew && !done;
-  function confirmDrop() {
+  function confirmDrop(reason: string) {
     if (dropping === "clear") t.clear();
     else {
+      try {
+        voidTicket(deps, t.ticket, reason);
+      } catch (e) {
+        setNotice((e as Error).message);
+      }
       discardHeld(t.ticket.id);
       setPaying(false);
       setShowTicket(false);
@@ -167,10 +178,23 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
     }
     setDropping(null);
   }
+  function confirmHeldVoid(reason: string) {
+    if (!voidingHeld) return;
+    try {
+      if (voidingHeld.lines.length) voidTicket(deps, voidingHeld, reason);
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+    discardHeld(voidingHeld.id);
+    setVoidingHeld(null);
+  }
+  const heldVoidCount = voidingHeld?.lines.reduce((s, l) => s + l.qty, 0) ?? 0;
+  const heldVoidSheet = <VoidSheet kind="void" open={voidingHeld !== null} onClose={() => setVoidingHeld(null)} onConfirm={confirmHeldVoid} items={heldVoidCount} totalPaise={voidingHeld ? heldTotal(voidingHeld) : 0} />;
   const sheets = (
     <>
       {heldSheet}
       <VoidSheet kind={dropping ?? "void"} open={dropping !== null} onClose={() => setDropping(null)} onConfirm={confirmDrop} items={t.bill.itemQty} totalPaise={t.bill.grandTotalPaise} />
+      {heldVoidSheet}
     </>
   );
 
@@ -203,6 +227,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
           </Button>
         ) : null}
         {heldSheet}
+        {heldVoidSheet}
       </View>
     );
   }
@@ -218,7 +243,8 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
   ) : (
     <View className="flex-row gap-2">
       <Button size="lg" className="flex-1" disabled={!hasNew || billed} onPress={onSendKot}>
-        <Text>Send KOT</Text>
+        {/* No kitchen: the same step just saves the round to the order (stock, table, records). */}
+        <Text>{kitchenOn(session.client) ? "Send KOT" : "Save order"}</Text>
       </Button>
       <Button size="lg" variant="secondary" className="flex-1" disabled={!order || hasNew || billed} onPress={onBill}>
         <Text>Bill</Text>

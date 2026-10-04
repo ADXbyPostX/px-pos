@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Ban, Trash2 } from "lucide-react-native";
-import { formatINR, type Paise } from "@px-pos/core";
+import { formatINR, VOID_REASONS, type Paise } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { Text } from "@/components/ui/text";
 import { colors } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 
 /** Sits to the right of Pay: throws away an order that hasn't been sent or paid. */
 export function VoidButton({ onPress, size = "xl" }: { onPress: () => void; size?: "lg" | "xl" }) {
@@ -31,33 +33,67 @@ const COPY = {
 } as const;
 
 /**
- * "Are you sure?" before a void or a clear. Nothing was sent to the kitchen or charged,
- * so the items just disappear (Void also starts a fresh order).
+ * "Are you sure?" before a void or a clear. Nothing was sent to the kitchen or charged, so no
+ * bill is affected. A void asks why: it's recorded in the day's voids (Day screen, admin Orders);
+ * a clear just empties the cart.
  */
-export function VoidSheet({ kind, open, onClose, onConfirm, items, totalPaise }: { kind: "void" | "clear"; open: boolean; onClose: () => void; onConfirm: () => void; items: number; totalPaise: Paise }) {
+export function VoidSheet({ kind, open, onClose, onConfirm, items, totalPaise }: { kind: "void" | "clear"; open: boolean; onClose: () => void; onConfirm: (reason: string) => void; items: number; totalPaise: Paise }) {
   const c = COPY[kind];
+  const [reason, setReason] = useState<string | null>(null);
+  const close = () => {
+    setReason(null);
+    onClose();
+  };
+  const ready = kind === "clear" || reason != null;
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       title={c.title}
       footer={
         <>
-          <Button variant="outline" onPress={onClose}>
+          <Button variant="outline" onPress={close}>
             <Text>Keep order</Text>
           </Button>
-          <Button onPress={onConfirm} accessibilityLabel={`Confirm: ${c.confirm}`}>
+          <Button
+            disabled={!ready}
+            onPress={() => {
+              onConfirm(reason ?? "");
+              setReason(null);
+            }}
+            accessibilityLabel={`Confirm: ${c.confirm}`}
+          >
             <c.Icon color="#fff" size={18} />
             <Text>{c.confirm}</Text>
           </Button>
         </>
       }
     >
-      <View className="gap-2">
+      <View className="gap-3">
         <Text className="text-lg">
           {items} item{items === 1 ? "" : "s"} · {formatINR(totalPaise, { decimals: "auto" })} {c.what}.
         </Text>
-        <Text className="text-muted-foreground">Nothing has been sent to the kitchen or paid yet, so no bill is affected.</Text>
+        {kind === "void" ? (
+          <>
+            <Text className="text-muted-foreground">Why? It goes in today&apos;s voids.</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {VOID_REASONS.map((r) => (
+                <Pressable
+                  key={r.key}
+                  onPress={() => setReason(r.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: reason === r.key }}
+                  accessibilityLabel={r.label}
+                  className={cn("h-11 justify-center rounded-full border px-4", reason === r.key ? "border-primary bg-primary/15" : "border-border active:bg-accent")}
+                >
+                  <Text className={reason === r.key ? "font-semibold text-primary" : undefined}>{r.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : (
+          <Text className="text-muted-foreground">Nothing has been sent to the kitchen or paid yet, so no bill is affected.</Text>
+        )}
       </View>
     </Sheet>
   );
