@@ -49,7 +49,7 @@ export default function Gate() {
   if (session.status === "paired") return <Redirect href="/till" />;
   return (
     <View className="flex-1 items-center justify-center gap-10 bg-background">
-      <BrandImage width={360} />
+      <BrandImage kind="short" width={260} />
       {session.status === "error" ? <BootProblem error={session} onRetry={retry} /> : <ActivityIndicator color={colors.red} size="large" />}
     </View>
   );

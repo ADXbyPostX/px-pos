@@ -30,6 +30,7 @@ import { useCollection, type WithId } from "@/lib/firebase/hooks";
 import { cryptoRand } from "@/lib/ids";
 import { hashPin, suggestPin } from "@/lib/pin";
 import { useRunPlan } from "@/lib/run-plan";
+import { cn } from "@/lib/utils";
 
 type Admin = WithId<PlatformUser>;
 const person = (a: Admin): AdminPerson => ({ uid: a.id, name: a.name, active: a.active, ...(a.pinHash ? { pinHash: a.pinHash } : {}) });
@@ -286,7 +287,8 @@ export function AdminsView() {
           <Button
             variant="ghost"
             size="sm"
-            className={a.pinHash ? undefined : "text-warning"}
+            // Pull the ghost padding back so the icon lines up with the column header.
+            className={cn("-ml-2.5 whitespace-nowrap", !a.pinHash && "text-warning")}
             onClick={(e) => {
               e.stopPropagation();
               setPinFor(a);
@@ -343,7 +345,7 @@ export function AdminsView() {
       </Stats>
       <Loadable state={{ ...live, data: people }} onRetry={live.retry} empty={{ icon: ShieldCheck, label: "No admins yet. Admins manage only the clients you assign them.", action: <Button size="sm" onClick={() => setAdding(true)}>Add admin</Button> }}>
         {(rows) => (
-          <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <DataTable rows={rows} columns={columns} rowKey={(a) => a.id} caption="Admins" />
             <Panel
               title="Assignments"

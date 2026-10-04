@@ -3,11 +3,30 @@
 import * as React from "react"
 import { cn } from "cn"
 
+/**
+ * On desktop the container clips instead of scrolling so the header can stick to the page's
+ * scroll pane. A table wider than its card must never be cut off, though: it measures itself
+ * and falls back to horizontal scrolling (giving up the sticky header) while it doesn't fit.
+ */
 function Table({ className, ...props }: React.ComponentProps<"table">) {
+  const box = React.useRef<HTMLDivElement>(null)
+  const [overflowing, setOverflowing] = React.useState(false)
+  React.useEffect(() => {
+    const el = box.current
+    const table = el?.querySelector<HTMLTableElement>(":scope > table")
+    if (!el || !table) return
+    // Fires once on observe, then whenever the card or the table changes width.
+    const ro = new ResizeObserver(() => setOverflowing(table.offsetWidth > el.clientWidth + 1))
+    ro.observe(el)
+    ro.observe(table)
+    return () => ro.disconnect()
+  }, [])
   return (
     <div
+      ref={box}
       data-slot="table-container"
-      className="relative w-full overflow-x-auto lg:overflow-x-clip"
+      data-overflowing={overflowing || undefined}
+      className={cn("relative w-full overflow-x-auto", !overflowing && "lg:overflow-x-clip")}
     >
       <table
         data-slot="table"

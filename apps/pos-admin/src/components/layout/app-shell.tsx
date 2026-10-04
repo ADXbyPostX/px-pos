@@ -14,7 +14,7 @@ import { SiteHeader } from "./site-header";
 function Splash() {
   return (
     <div className="flex flex-1 items-center justify-center" aria-busy aria-label="Loading PX POS">
-      <Image src={brand.mark.src} alt="" width={brand.mark.width} height={brand.mark.height} priority unoptimized className="size-14 animate-pulse" />
+      <Image src={brand.wordmark.src} alt="" width={brand.wordmark.width} height={brand.wordmark.height} priority unoptimized className="h-10 w-auto animate-pulse" />
     </div>
   );
 }

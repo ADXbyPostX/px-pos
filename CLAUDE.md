@@ -31,7 +31,7 @@
 - Assets live in each app (moved there from the repo root on 2026-09-29):
   - `apps/pos-admin/public/brand/{favicon,postxpos,pxpos}/`
   - `apps/pos-app/assets/brand/{favicon,postxpos,pxpos}/` (RN bundles only `require()`d images; Expo `public/` is web-only)
-- Usage: **favicon/** (PX mark) → browser chrome, app icons, collapsed sidebar, 404. **postxpos** (main wordmark) → `/setup`, app splash/pairing/lock. **pxpos** (short wordmark) → expanded sidebar, app rail, PDFs/receipts (`-black` on paper).
+- Usage: **favicon/** (PX mark) → browser chrome, app icons, collapsed sidebar, 404. **postxpos** (main wordmark) → `/setup`, app pairing. **pxpos** (short wordmark) → every splash/loading screen (admin loading, app native splash + boot screen — Mandy, 2026-10-05), expanded sidebar, app rail/lock, PDFs/receipts (`-black` on paper). The app's native splash is rendered by `npm run icons` and needs `npx expo prebuild --platform android` before a build.
 - One registry per app: `apps/pos-admin/src/lib/brand.ts`, `apps/pos-app/src/lib/brand.ts`. A logo swap touches only these + the files.
 - App launcher icons are rendered at 1024 by `npm run icons` (Inkscape) from the SVGs.
 
@@ -42,6 +42,7 @@
 - **No subtitles, helper text or visible page titles.** `PageHeader` renders an sr-only h1; toolbars, filters and primary buttons are portalled into the top bar (`#header-actions`).
 - **One full-width container**, `p-4 md:p-6`. **Never** a centred max-width container. Use the space: stats strips, grids, dense tables, side sheets.
 - **The page never scrolls; only the content pane does.** Table heads and Panel titles are sticky at `-top-4 md:-top-6`. Cards use `overflow-clip`, never `overflow-hidden`.
+- **Tables never clip.** `ui/table.tsx` measures itself: while it fits it clips on lg+ (keeps the sticky head); wider than its card it switches to horizontal scroll. Still size layouts so tables fit — e.g. a table beside a panel gets the bigger share (`3fr`/`2fr`) — and pull ghost buttons in cells back (`-ml-2.5`) so they line up with the column header.
 - Add components only with `npx shadcn@latest add <name>` (from `apps/pos-admin`), then `grep -rn "shadow-\|backdrop-blur" src/components/ui` must be empty. Never re-add a component px-ops already customised (toggle-group, input-group, table, sidebar …); answer **no** to overwrites.
 - Status colours: white / zinc / brand red, plus blue (`--qc`), green (`--success`), yellow (`--warning`) each for one purpose.
 - Every async surface: loading (skeleton) + empty + error (Panel with Retry). Every route has `loading.tsx` + `error.tsx`; root has `not-found.tsx` + `global-error.tsx`. `Loadable` wraps every live listener.

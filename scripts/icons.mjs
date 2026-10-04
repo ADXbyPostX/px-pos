@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Renders pos-app launcher/splash icons from the brand SVGs with Inkscape.
- * Source: apps/pos-app/assets/brand/favicon/{favicon,px-white}.svg (Mandy's PX mark).
+ * Source: apps/pos-app/assets/brand/favicon/{favicon,px-white}.svg (Mandy's PX mark) for the icons,
+ * apps/pos-app/assets/brand/pxpos/pxpos-white.svg (PXPOS wordmark) for the splash.
  * Output: apps/pos-app/assets/generated/*.png (referenced by app.config.ts).
  *
  *   npm run icons
@@ -35,6 +36,7 @@ function render(svg, name, size, { background } = {}) {
 }
 
 const favicon = readFileSync(join(brand, "favicon.svg"), "utf8");
+const pxposWhite = readFileSync(join(root, "apps/pos-app/assets/brand/pxpos/pxpos-white.svg"), "utf8");
 const pxWhite = readFileSync(join(brand, "px-white.svg"), "utf8");
 
 // The mark's centre in px-white.svg user units (viewBox 966.1 -271.9 1138.8 1138.8).
@@ -47,6 +49,14 @@ function reframe(svg, fraction) {
   return svg.replace(/viewBox="[^"]+"/, `viewBox="${vb}"`);
 }
 
+/** The wide wordmark centred on a transparent square; `fraction` = its viewBox width / the square's side. */
+function squareWordmark(svg, fraction) {
+  const [x, y, w, h] = svg.match(/viewBox="([^"]+)"/)[1].split(/\s+/).map(Number);
+  const size = w / fraction;
+  const vb = `${(x + w / 2 - size / 2).toFixed(1)} ${(y + h / 2 - size / 2).toFixed(1)} ${size.toFixed(1)} ${size.toFixed(1)}`;
+  return svg.replace(/viewBox="[^"]+"/, `viewBox="${vb}"`).replace(/width="[^"]+"/, 'width="1024"').replace(/height="[^"]+"/, 'height="1024"');
+}
+
 console.log("Rendering pos-app icons →", out);
 // iOS / legacy icon: full-bleed black square (no transparent corners; iOS applies its own mask).
 render(favicon.replace(/rx="[^"]+"/, 'rx="0"'), "icon", 1024, { background: "#000000" });
@@ -57,8 +67,11 @@ console.log("  ✓ icon.png flattened (no alpha)");
 render(reframe(pxWhite, 0.52), "adaptive-foreground", 1024);
 // Android 13 themed icon: same framing, single colour (white) silhouette.
 render(reframe(pxWhite, 0.52).replace(/#fe0101/gi, "#ffffff"), "adaptive-monochrome", 1024);
-// Splash (Android 12+ masks the splash icon to a circle): PX mark, generous padding.
-render(reframe(pxWhite, 0.6), "splash", 1024);
+// Splash: the PXPOS wordmark (Mandy, 2026-10-05). Expo centres the image at `imageWidth` (200 dp) in a
+// 288 dp canvas and Android 12+ shows only the middle 192 dp circle. The SVG's viewBox carries side
+// padding, so at 1.06 the letters span ~86% of the square (≈172 × 49 dp) with the corners still
+// inside the circle.
+render(squareWordmark(pxposWhite, 1.06), "splash", 1024);
 
 rmSync(tmp, { recursive: true, force: true });
 console.log("Done.");

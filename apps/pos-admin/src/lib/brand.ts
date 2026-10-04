@@ -1,7 +1,7 @@
 /**
  * The only place brand asset paths live (files in public/brand, supplied by Mandy 2026-09-28).
  * Swapping the logo = replace the files and/or edit this object.
- *  - pxpos     short wordmark: expanded sidebar, PDFs/print (black on paper)
+ *  - pxpos     short wordmark: loading splash, expanded sidebar, PDFs/print (black on paper)
  *  - postxpos  main wordmark:  /setup
  *  - favicon   PX mark:        collapsed sidebar, 404, browser chrome (src/app/icon.svg etc.)
  */
