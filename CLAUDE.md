@@ -105,6 +105,8 @@ Part of **PostX** (see `/Volumes/PostXMaster/CLAUDE.md`). Second Brain note: `Pr
 - `/taster` — before any deploy (both apps)
 - `playwright-skill` — admin golden paths + layout checks at 1440/390 px
 
-## Git
+## Git & deploy
 
-`git init` done; **never commit unless Mandy asks.**
+- Repo: `github.com/ADXbyPostX/px-pos` (`main` = production). **Never commit unless Mandy asks.**
+- pos-admin deploys on Vercel (team post-x, project `px-pos`) from every push: `main` → production, other branches → previews. Project settings: root `apps/pos-admin`, install `cd ../.. && npm ci` (workspace root, so `@px-pos/core` resolves), region `bom1` (`apps/pos-admin/vercel.json`). `NEXT_PUBLIC_FIREBASE_*` are set for production + preview; `NEXT_PUBLIC_DEV_PERSONAS` is never set there.
+- Security headers (CSP allowing only Firebase on `*.googleapis.com`) live in `apps/pos-admin/next.config.ts`; adding a third-party service means adding it to the CSP.
