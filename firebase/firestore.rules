@@ -1,0 +1,201 @@
+rules_version = '2';
+
+// px-pos Firestore rules — the security boundary for BOTH apps (pos-admin uses the client SDK,
+// terminals write directly while offline). Phase 1: anonymous auth + access by documents:
+//   platformUsers/{uid}            super admin / admin (pos-admin)
+//   clients/{c}/members/{uid}      paired terminals (and phase-2 owner/staff logins)
+// Deletes are never allowed. Tests: firebase/test/rules.test.ts (npm run rules:test).
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // ── identity ────────────────────────────────────────────────────────────
+    function authed() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    function platPath() { return /databases/$(db)/documents/platformUsers/$(request.auth.uid); }
+    function isPlat() { return authed() && exists(platPath()) && get(platPath()).data.active == true; }
+    function isSuper() { return isPlat() && get(platPath()).data.role == 'superadmin'; }
+    function clientData(c) { return get(/databases/$(db)/documents/clients/$(c)).data; }
+    function isAdminOf(c) { return isPlat() && get(platPath()).data.role == 'admin' && uid() in clientData(c).adminUids; }
+    function canManage(c) { return isSuper() || isAdminOf(c); }
+
+    function memPath(c) { return /databases/$(db)/documents/clients/$(c)/members/$(request.auth.uid); }
+    function mem(c) { return get(memPath(c)).data; }
+    function termPath(c, t) { return /databases/$(db)/documents/clients/$(c)/terminals/$(t); }
+    // A terminal member is live only while its terminal doc is active (revoke kills queued writes).
+    function memberLive(c) {
+      return !('terminalId' in mem(c)) || get(termPath(c, mem(c).terminalId)).data.status == 'active';
+    }
+    function isMember(c) { return authed() && exists(memPath(c)) && mem(c).active == true && memberLive(c); }
+    function myTerminal(c) { return mem(c).terminalId; }
+    function canRead(c) { return canManage(c) || isMember(c); }
+
+    // Exactly-once: a stats/stock increment must carry the key of a posting created in this same batch.
+    function posted(c) {
+      let k = request.resource.data.lastPostingKey;
+      return k is string && k.size() > 0
+        && existsAfter(/databases/$(db)/documents/clients/$(c)/postings/$(k))
+        && !exists(/databases/$(db)/documents/clients/$(c)/postings/$(k));
+    }
+
+    // A terminal may only issue the next number of its own series (seq recorded on its terminal doc).
+    function validInvoiceSeq(c) {
+      let t = myTerminal(c);
+      let before = get(termPath(c, t)).data;
+      let after = getAfter(termPath(c, t)).data;
+      return request.resource.data.terminalId == t
+        && request.resource.data.series == before.series
+        && request.resource.data.seq == after.lastInvoiceSeq
+        && request.resource.data.fy == after.lastInvoiceFy
+        && (before.lastInvoiceFy != request.resource.data.fy || request.resource.data.seq > before.lastInvoiceSeq);
+    }
+
+    // ── platform ────────────────────────────────────────────────────────────
+    match /meta/bootstrap {
+      allow get: if authed();
+      // Create-only, and only together with the caller's own superadmin platformUsers doc.
+      allow create: if authed() && request.resource.data.uid == uid()
+        && getAfter(platPath()).data.role == 'superadmin';
+    }
+
+    match /platformUsers/{u} {
+      allow get: if authed() && (uid() == u || isSuper());
+      allow list: if isSuper();
+      allow create: if isSuper()
+        || (authed() && uid() == u
+            && request.resource.data.role == 'superadmin'
+            && request.resource.data.active == true
+            && !exists(/databases/$(db)/documents/meta/bootstrap)
+            && existsAfter(/databases/$(db)/documents/meta/bootstrap));
+      allow update: if isSuper();
+    }
+
+    match /pairingRequests/{u} {
+      allow create: if authed() && uid() == u
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly(['code', 'deviceName', 'model', 'platform', 'appVersion', 'status', 'createdAtMs', 'updatedAtMs'])
+        && request.resource.data.code is string && request.resource.data.code.size() == 13;
+      allow get: if authed() && (uid() == u || isPlat());
+      allow list: if isPlat();
+      allow update: if
+        // The tablet may refresh its own (unpaired) request, e.g. a new code after a rejection.
+        (authed() && uid() == u && resource.data.status != 'paired'
+          && request.resource.data.status == 'pending'
+          && changed().hasOnly(['code', 'deviceName', 'model', 'platform', 'appVersion', 'status', 'updatedAtMs']))
+        // A device that was paired but is no longer a live member there (revoked, or its outlet
+        // removed) republishes a fresh pending request so it can be paired again.
+        || (authed() && uid() == u && resource.data.status == 'paired'
+          && !isMember(resource.data.cid)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.keys().hasOnly(['code', 'deviceName', 'model', 'platform', 'appVersion', 'status', 'createdAtMs', 'updatedAtMs'])
+          && request.resource.data.code is string && request.resource.data.code.size() == 13)
+        // An admin rejects, or pairs into a client they manage.
+        || (isPlat() && request.resource.data.status == 'rejected' && changed().hasOnly(['status', 'updatedAtMs']))
+        || (isPlat() && request.resource.data.status == 'paired' && canManage(request.resource.data.cid));
+    }
+
+    // ── tenants ─────────────────────────────────────────────────────────────
+    match /clients/{c} {
+      allow get: if canRead(c);
+      allow list: if isSuper() || (isPlat() && uid() in resource.data.adminUids);
+      allow create: if isSuper();
+      allow update: if isSuper()
+        || (isAdminOf(c) && !changed().hasAny(['adminUids', 'status']))
+        // Z close (terminal, in a transaction): only the next Z number.
+        || (isMember(c) && changed().hasOnly(['lastZNo', 'updatedAtMs']) && request.resource.data.lastZNo == resource.data.lastZNo + 1);
+
+      // Read anything inside a tenant you can read.
+      match /{col}/{id} {
+        allow read: if canRead(c);
+      }
+
+      // Setup (pos-admin only).
+      match /members/{u}     { allow create, update: if canManage(c); }
+      match /staff/{id}      { allow create, update: if canManage(c); }
+      match /categories/{id} { allow create, update: if canManage(c); }
+      match /floors/{id}     { allow create, update: if canManage(c); }
+      match /tables/{id}     { allow create, update: if canManage(c); }
+      match /items/{id} {
+        allow create, update: if canManage(c);
+        // Terminals may only switch availability (86 an item / stock auto-off).
+        allow update: if isMember(c) && changed().hasOnly(['available', 'updatedAtMs']);
+      }
+      // Item photos: small inline JPEGs (≤ ~200 KB as base64), keyed by item id.
+      match /itemPhotos/{id} {
+        allow create, update: if canManage(c)
+          && request.resource.data.itemId == id
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 280000
+          && request.resource.data.mime in ['image/jpeg', 'image/webp', 'image/png']
+          && request.resource.data.active is bool;
+      }
+
+      match /terminals/{t} {
+        allow create: if canManage(c);
+        allow update: if canManage(c)
+          || (isMember(c) && myTerminal(c) == t
+              && changed().hasOnly(['lastSeenAt', 'lastSeenAtMs', 'clockSkewMs', 'appVersion', 'pendingWrites', 'journalRejected',
+                                    'lastInvoiceSeq', 'lastInvoiceFy', 'lastKot', 'lastOrder', 'lastToken', 'printers', 'updatedAtMs'])
+              && (request.resource.data.lastInvoiceFy != resource.data.lastInvoiceFy
+                  || request.resource.data.lastInvoiceSeq >= resource.data.lastInvoiceSeq));
+      }
+
+      // Sales.
+      match /orders/{id} {
+        allow create: if canManage(c) || (isMember(c) && request.resource.data.terminalId == myTerminal(c));
+        allow update: if canRead(c)
+          // An invoice, once attached, can never be swapped (blocks double billing from two tablets).
+          && (!('invoiceId' in resource.data) || request.resource.data.get('invoiceId', null) == resource.data.invoiceId)
+          && (resource.data.status != 'settled'
+              || (request.resource.data.status in ['settled', 'cancelled']
+                  && changed().hasOnly(['delivery', 'flags', 'cancel', 'status', 'updatedAtMs', 'rev'])))
+          && (resource.data.status != 'cancelled' || changed().hasOnly(['flags', 'updatedAtMs']));
+      }
+
+      match /invoices/{id} {
+        allow create: if canManage(c) || (isMember(c) && validInvoiceSeq(c));
+        allow update: if canRead(c) && resource.data.status == 'issued'
+          && (changed().hasOnly(['status', 'cancel', 'printedCount', 'lastPrintedAtMs', 'updatedAtMs'])
+              // Edit bill: same number, new bill, only while the order is not settled.
+              || (changed().hasOnly(['bill', 'lines', 'modifiedCount', 'updatedAtMs'])
+                  && getAfter(/databases/$(db)/documents/clients/$(c)/orders/$(resource.data.orderId)).data.status != 'settled'));
+      }
+
+      match /kots/{id} {
+        allow create: if canRead(c);
+        allow update: if canRead(c) && changed().hasOnly(['status', 'statusAtMs', 'reprints', 'updatedAtMs']);
+      }
+
+      match /payments/{id}      { allow create: if canRead(c); }
+      match /postings/{id}      { allow create: if canRead(c); }
+      match /auditLog/{id}      { allow create: if canRead(c); }
+      match /cashMovements/{id} { allow create: if canRead(c); }
+      match /customers/{id}     { allow create, update: if canRead(c); }
+
+      match /expenses/{id} {
+        allow create: if canRead(c);
+        allow update: if canRead(c) && resource.data.status == 'active' && changed().hasOnly(['status', 'void', 'updatedAtMs']);
+      }
+
+      // Day, drawers, aggregates.
+      match /days/{d} {
+        allow create: if canRead(c);
+        // Closed days are locked; only the super admin can reopen.
+        allow update: if (canRead(c) && resource.data.status != 'closed') || isSuper();
+      }
+      match /drawers/{id} {
+        allow create: if canRead(c);
+        allow update: if canRead(c) && (resource.data.status != 'closed' || canManage(c));
+      }
+      match /dailyStats/{d}     { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
+      match /stock/{i}          { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
+      match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper(); }
+    }
+
+    // ── super-admin cross-client views (collection groups) ──────────────────
+    match /{path=**}/dailyStats/{d} { allow read: if isSuper(); }
+    match /{path=**}/terminals/{t}  { allow read: if isSuper(); }
+    match /{path=**}/days/{d}       { allow read: if isSuper(); }
+  }
+}

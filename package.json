@@ -1,0 +1,34 @@
+{
+  "name": "px-pos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PostX POS: pos-admin (Next.js) + pos-app (Expo) on one Firebase backend",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:admin": "npm run dev -w pos-admin",
+    "build:admin": "npm run build -w pos-admin",
+    "test": "npm test -w @px-pos/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "rules:test": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH npx -y firebase-tools@15.29.0 emulators:exec --config firebase/firebase.json --only firestore --project demo-px-pos \"vitest run --root firebase/test\"",
+    "rules:deploy": "npx -y firebase-tools@15.29.0 deploy --config firebase/firebase.json --only firestore:rules,firestore:indexes --account adxbypostx@gmail.com --project postx-pos --non-interactive",
+    "icons": "node scripts/icons.mjs"
+  },
+  "overrides": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native-svg": "15.15.5"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "@types/node": "^22",
+    "firebase": "12.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

@@ -1,0 +1,40 @@
+# deps
+node_modules/
+.pnp*
+
+# env + credentials (never commit)
+.env
+.env*.local
+.env.*
+!.env.example
+*service-account*.json
+google-services.json
+GoogleService-Info.plist
+*.jks
+*.keystore
+keystore.properties
+*.pem
+
+# builds
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+.expo/
+web-build/
+apps/pos-app/android/
+apps/pos-app/ios/
+*.apk
+*.aab
+*.ipa
+
+# tooling
+.vercel
+.DS_Store
+coverage/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.log

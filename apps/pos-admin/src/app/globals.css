@@ -1,0 +1,285 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-brand: var(--brand);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-qc: var(--qc);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * PostX theme — dark only. Pure black ground, zinc greys, signature red #fc0303.
+ * The app is always rendered with `class="dark"` on <html>; :root and .dark are
+ * kept identical so no light palette can leak in. Flat surfaces only: no shadows,
+ * no blur, no glows. The one allowed accent is the red background layer (.bg-ember).
+ */
+:root,
+.dark {
+  color-scheme: dark;
+
+  --brand: #fc0303;
+  /* Finished progress (bars, "Completed" labels) and settled shows. */
+  --success: #22c55e;
+  /* Only a finished show that is still unsettled. */
+  --warning: #eab308;
+  /* QC theater: its badge dot and calendar blocks. Main theater is brand red. */
+  --qc: #3b82f6;
+
+  --background: #000000;
+  --foreground: oklch(0.985 0 0);
+
+  --card: #080808;
+  --card-foreground: oklch(0.985 0 0);
+  --popover: #0a0a0a;
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: #fc0303;
+  --primary-foreground: #ffffff;
+
+  --secondary: oklch(0.21 0.006 285.885);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.21 0.006 285.885);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.21 0.006 285.885);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --destructive: oklch(0.637 0.237 25.331);
+
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: #fc0303;
+
+  --chart-1: #fc0303;
+  --chart-2: oklch(0.704 0.191 22.216);
+  --chart-3: oklch(0.808 0.114 19.571);
+  --chart-4: oklch(0.705 0.015 286.067);
+  --chart-5: oklch(0.442 0.017 285.786);
+
+  --radius: 0.625rem;
+
+  --sidebar: #050505;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #fc0303;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: oklch(0.21 0.006 285.885);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: #fc0303;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* The page itself never scrolls sideways; wide content scrolls inside its own container.
+     `clip` (not `hidden`) so nothing inside loses position context. The app
+     shell is `h-svh overflow-hidden`; only its content pane scrolls. */
+  html,
+  body {
+    overflow-x: clip;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Flat UI: no elevation anywhere, including shadcn defaults. */
+  [class*="shadow-"] {
+    box-shadow: none;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 35%, transparent);
+  }
+}
+
+@layer utilities {
+  /*
+   * Ember — the one background layer (Mandy, 2026-09-29; replaced the px-ops dot grid).
+   * Pure black with two soft brand-red glows that drift and breathe on slow, out-of-phase loops,
+   * a static crown glow under the header, and a black film grain that only textures the red
+   * (black speckles on black are invisible, so the ground stays #000).
+   * Usage: <div aria-hidden className="bg-ember" /> as the first child of an `isolate` wrapper.
+   * GPU-only: the element is fixed + clipped + contained; only transform/opacity animate.
+   * The softness comes from the gradient masks, never from filter: blur().
+   */
+  .bg-ember {
+    --ember-core: color-mix(in srgb, var(--brand) 18%, transparent);
+    --ember-deep: color-mix(in srgb, var(--brand) 14%, transparent);
+    --ember-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.4 0 0 0 -.55'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+    /* Gaussian-ish falloff: the shape of every glow. */
+    --ember-falloff: radial-gradient(closest-side, #000, rgb(0 0 0 / 0.55) 34%, rgb(0 0 0 / 0.2) 62%, rgb(0 0 0 / 0.05) 84%, transparent);
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    contain: strict;
+    pointer-events: none;
+    background: radial-gradient(70rem 24rem at 50% -7rem, color-mix(in srgb, var(--brand) 8%, transparent), transparent 70%);
+  }
+  .bg-ember::before,
+  .bg-ember::after {
+    content: "";
+    position: absolute;
+    mask-image: var(--ember-falloff);
+    -webkit-mask-image: var(--ember-falloff);
+    will-change: transform, opacity;
+  }
+  /* Upper right: the brighter ember. */
+  .bg-ember::before {
+    width: 68vmax;
+    height: 68vmax;
+    left: calc(78% - 34vmax);
+    top: calc(8% - 34vmax);
+    background: var(--ember-grain), var(--ember-core);
+    animation:
+      ember-drift-a 76s ease-in-out infinite alternate,
+      ember-breathe 19s ease-in-out infinite alternate;
+  }
+  /* Lower left: a wider, dimmer ellipse that counter-drifts. */
+  .bg-ember::after {
+    width: 92vmax;
+    height: 58vmax;
+    left: calc(34% - 46vmax);
+    top: calc(98% - 29vmax);
+    background: var(--ember-grain), var(--ember-deep);
+    animation:
+      ember-drift-b 92s ease-in-out -31s infinite alternate,
+      ember-breathe 27s ease-in-out -9s infinite alternate;
+  }
+  /* Phones: the header is taller, so drop the upper ember below it. */
+  @media (orientation: portrait) {
+    .bg-ember::before {
+      top: calc(20% - 34vmax);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bg-ember::before,
+    .bg-ember::after {
+      animation: none;
+      will-change: auto;
+    }
+  }
+}
+
+@keyframes ember-drift-a {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-14%, 9%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(-5%, 20%, 0) scale(0.94);
+  }
+}
+@keyframes ember-drift-b {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-6deg) scale(1);
+  }
+  50% {
+    transform: translate3d(12%, -10%, 0) rotate(4deg) scale(1.08);
+  }
+  100% {
+    transform: translate3d(22%, -4%, 0) rotate(9deg) scale(0.95);
+  }
+}
+@keyframes ember-breathe {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer base {
+  /* Touch devices: 44px targets without changing desktop density. */
+  @media (pointer: coarse) {
+    [data-slot="button"]:not([data-size="xs"]):not([data-size="sm"]):not([data-size="icon-xs"]):not([data-size="icon-sm"]),
+    [data-slot="input"],
+    [data-slot="select-trigger"],
+    [data-slot="tabs-trigger"],
+    [data-slot="toggle-group-item"] {
+      min-height: 2.75rem;
+    }
+    [data-slot="button"][data-size="icon"],
+    [data-slot="button"][data-size="icon-lg"] {
+      min-width: 2.75rem;
+    }
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@layer utilities {
+  /* Icon-only ghost buttons (bell, sidebar trigger, row menus, close) turn red on hover. */
+  /* data-slot is not used: asChild triggers (sheet, dropdown) overwrite it. */
+  [data-variant="ghost"][data-size^="icon"]:hover,
+  [data-slot="sidebar-trigger"]:hover {
+    color: var(--brand);
+  }
+  /* Sheets with a red title band use black text and a black close button. */
+  .sheet-on-brand [data-slot="sheet-close"],
+  .sheet-on-brand [data-slot="sheet-close"]:hover {
+    color: #000;
+  }
+  .sheet-on-brand [data-slot="sheet-close"]:hover {
+    background: color-mix(in oklch, #000 15%, transparent);
+  }
+}
