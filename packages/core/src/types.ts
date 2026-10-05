@@ -149,12 +149,24 @@ export interface Client extends Meta {
   invoicePrefix: string;
   discountCapBps: Record<StaffRole, Bps>;
   approvals: Approvals;
-  receipt: { header: string[]; footer: string[]; showSac: boolean };
+  receipt: { header: string[]; footer: string[]; showSac: boolean; logo?: ReceiptLogo };
   kds: { warnMin: number; lateMin: number };
   stockAutoOff: boolean;
   lastZNo: number;
   /** Where UPI payments go; the till shows a QR with the amount when set. */
   upi?: UpiAccount;
+}
+
+/**
+ * The outlet's logo as the printer draws it (admin › Settings › Receipt): a 1-bit raster,
+ * rows top to bottom, w/8 bytes per row, leftmost dot in the high bit, 1 = black.
+ */
+export interface ReceiptLogo {
+  /** Dots wide, a multiple of 8 (58 mm paper is 384 dots). */
+  w: number;
+  h: number;
+  /** base64 of the packed rows. */
+  data: string;
 }
 
 export type MemberRole = "terminal" | "owner" | "staff";

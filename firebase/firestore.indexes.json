@@ -406,6 +406,11 @@
       "collectionGroup": "itemPhotos",
       "fieldPath": "data",
       "indexes": []
+    },
+    {
+      "collectionGroup": "clients",
+      "fieldPath": "receipt.logo",
+      "indexes": []
     }
   ]
 }

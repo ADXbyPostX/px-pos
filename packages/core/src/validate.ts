@@ -1,3 +1,4 @@
+import { validateReceiptLogo } from "./logo";
 import { isValidInvoicePrefix } from "./numbering";
 import { EXPENSE_CATEGORIES, ORDER_MODES, STAFF_ROLES } from "./types";
 import type { Buyer, Client, Expense, Item, Paise, TaxMode } from "./types";
@@ -141,6 +142,10 @@ export function validateClient(c: Partial<Client>): string | null {
     const u = validateVpa(c.upi.vpa);
     if (u) return u;
     if (!nonEmpty(c.upi.payee, 50)) return "Enter the name shown to UPI payers";
+  }
+  if (c.receipt?.logo) {
+    const l = validateReceiptLogo(c.receipt.logo);
+    if (l) return `Receipt logo: ${l.charAt(0).toLowerCase()}${l.slice(1)}`;
   }
   // A regular outlet may wait for its GSTIN (bills omit the line; admin flags it as missing).
   if (c.invoicePrefix != null && !isValidInvoicePrefix(c.invoicePrefix)) return "Invoice prefix: up to 2 capital letters";

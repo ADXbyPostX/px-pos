@@ -1,18 +1,29 @@
 import { printsKots, renderInvoice, renderKot, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal } from "@px-pos/core";
+import { btPrinterPref } from "@/local/prefs";
 import { encodeReceipt } from "./encode";
-import { builtInPrinter, lanPrinter, type PrinterTransport } from "./transport";
+import { bluetoothPrinter, builtInPrinter, lanPrinter, type PrinterTransport } from "./transport";
 
 type PrinterCfg = NonNullable<Terminal["printers"]["receipt"]>;
 const cols = (p: PrinterCfg): Cols => (p.width === 58 ? 32 : 48);
 
+export interface Route {
+  transport: PrinterTransport;
+  cols: Cols;
+  kind: "bluetooth" | "lan" | "usb";
+  label: string;
+}
+
 /**
- * Where a job goes: the configured LAN printer, else the terminal's own USB printer
- * (built-in ones like the TP-482C's are 2-inch: 32 columns). Null = nothing to print on.
+ * Where a job goes: the Bluetooth printer chosen on this machine (Sync › Hardware), else the
+ * configured LAN printer, else the terminal's own USB printer (built-in ones like the TP-482C's
+ * are 2-inch: 32 columns). Null = nothing to print on.
  */
-function route(p: PrinterCfg | undefined): { transport: PrinterTransport; cols: Cols } | null {
-  if (p?.host) return { transport: lanPrinter({ host: p.host, port: p.port || 9100 }), cols: cols(p) };
+export function route(p: PrinterCfg | undefined): Route | null {
+  const bt = btPrinterPref();
+  if (bt) return { transport: bluetoothPrinter(bt.address), cols: bt.width === 80 ? 48 : 32, kind: "bluetooth", label: `Bluetooth printer ${bt.name}` };
+  if (p?.host) return { transport: lanPrinter({ host: p.host, port: p.port || 9100 }), cols: cols(p), kind: "lan", label: `Network printer ${p.host}` };
   const usb = builtInPrinter();
-  return usb ? { transport: usb.transport, cols: p?.width === 80 ? 48 : 32 } : null;
+  return usb ? { transport: usb.transport, cols: p?.width === 80 ? 48 : 32, kind: "usb", label: `Built-in printer (${usb.name})` } : null;
 }
 
 /**

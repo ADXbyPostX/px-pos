@@ -16,6 +16,7 @@ export * from "./stock";
 export * from "./presence";
 export * from "./roles";
 export * from "./receipt";
+export * from "./logo";
 export * from "./validate";
 export * from "./menu-import";
 export * from "./menu-photos";

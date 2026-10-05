@@ -1,16 +1,19 @@
 import { halfRateLabel } from "./bill";
 import { MODE_LABEL, STATION_LABEL } from "./kot";
+import { validateReceiptLogo } from "./logo";
 import { formatINR } from "./money";
 import { istDateTimeLabel, istDateLabel } from "./time";
-import type { BillResult, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, Supplier, ZReport } from "./types";
+import type { BillResult, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, Supplier, ZReport } from "./types";
 
 /**
  * Printer-neutral receipt model. ASCII only: ESC/POS code pages have no ₹, so printed
  * money uses "Rs." The same lines drive the thermal encoder, the on-screen preview
- * (monospace) and the A4/PDF view.
+ * (monospace) and the A4/PDF view. An image (the outlet's logo) prints centred; plain-text
+ * renderings leave it out.
  */
 export type ReceiptLine =
   | { kind: "text"; text: string; align?: "left" | "center" | "right"; bold?: boolean; size?: 1 | 2; invert?: boolean }
+  | { kind: "image"; logo: ReceiptLogo }
   | { kind: "rule"; char?: "-" | "=" }
   | { kind: "feed"; lines?: number }
   | { kind: "cut" };
@@ -117,6 +120,8 @@ export interface ReceiptSettings {
   header: string[];
   footer: string[];
   showSac: boolean;
+  /** Printed above the outlet's name on bills (never on KOTs or the Z report). */
+  logo?: ReceiptLogo;
 }
 
 export const RESTAURANT_SAC = "996331";
@@ -127,6 +132,7 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   const { cols } = opts;
   const out: ReceiptLine[] = [];
   const s = inv.supplier;
+  if (settings.logo && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo });
   out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
   for (const l of wrap(s.address, cols)) out.push(center(l));
   if (s.phone) out.push(center(`Ph: ${s.phone}`));
@@ -328,6 +334,7 @@ export function receiptText(lines: ReceiptLine[], cols: Cols): string {
     if (l.kind === "rule") out.push((l.char ?? "-").repeat(cols));
     else if (l.kind === "feed") for (let i = 0; i < (l.lines ?? 1); i++) out.push("");
     else if (l.kind === "cut") out.push("");
+    else if (l.kind === "image") continue;
     else {
       const text = asciiSafe(l.text).slice(0, cols);
       if (l.align === "center") {

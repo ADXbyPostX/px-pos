@@ -47,8 +47,20 @@ export interface CustomerDisplayTest {
   error: string | null;
 }
 
+/** A device paired in Android's Bluetooth settings. `majorClass` is Android's BluetoothClass.Device.Major (-1 unknown). */
+export interface BluetoothDeviceInfo {
+  address: string;
+  name: string;
+  majorClass: number;
+  /** Advertises the serial-port profile printers print over (unknown until Android has looked it up). */
+  spp: boolean;
+}
+
 interface PosHardwareNative {
   listUsbPrinters(): UsbPrinterInfo[];
+  bluetoothState(): { supported: boolean; enabled: boolean };
+  listBluetoothDevices(): BluetoothDeviceInfo[];
+  printBluetooth(address: string, bytes: Uint8Array): Promise<void>;
   usbPrinterStatus(): Promise<UsbPrinterStatus>;
   printUsb(bytes: Uint8Array): Promise<void>;
   openCashDrawer(): Promise<void>;
@@ -73,6 +85,29 @@ export function listUsbPrinters(): UsbPrinterInfo[] {
 export function printUsb(bytes: Uint8Array): Promise<void> {
   if (!Native) return Promise.reject(new Error("This build can't use USB printers"));
   return Native.printUsb(bytes);
+}
+
+export function bluetoothState(): { supported: boolean; enabled: boolean } {
+  try {
+    return Native?.bluetoothState() ?? { supported: false, enabled: false };
+  } catch {
+    return { supported: false, enabled: false };
+  }
+}
+
+/** Paired Bluetooth devices (empty when Bluetooth is off or not allowed). */
+export function listBluetoothDevices(): BluetoothDeviceInfo[] {
+  try {
+    return Native?.listBluetoothDevices() ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Raw ESC/POS to a paired Bluetooth printer (classic SPP). */
+export function printBluetooth(address: string, bytes: Uint8Array): Promise<void> {
+  if (!Native) return Promise.reject(new Error("This build can't use Bluetooth printers"));
+  return Native.printBluetooth(address, bytes);
 }
 
 export function usbPrinterStatus(): Promise<UsbPrinterStatus> {

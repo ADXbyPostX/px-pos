@@ -1,12 +1,12 @@
 import TcpSocket from "react-native-tcp-socket";
-import { listUsbPrinters, printUsb } from "../../modules/pos-hardware";
+import { listUsbPrinters, printBluetooth, printUsb } from "../../modules/pos-hardware";
 
 export interface PrinterTarget {
   host: string;
   port: number;
 }
 
-/** Anything that can take ESC/POS bytes: a LAN printer or the terminal's own USB printer. */
+/** Anything that can take ESC/POS bytes: a LAN, Bluetooth or the terminal's own USB printer. */
 export interface PrinterTransport {
   send(bytes: Uint8Array): Promise<void>;
 }
@@ -48,4 +48,9 @@ export function builtInPrinter(): { transport: PrinterTransport; name: string } 
   const p = listUsbPrinters()[0];
   if (!p) return null;
   return { transport: { send: (bytes) => printUsb(bytes) }, name: p.product || p.manufacturer || "USB printer" };
+}
+
+/** A Bluetooth printer paired with this machine (Android Bluetooth settings), by its address. */
+export function bluetoothPrinter(address: string): PrinterTransport {
+  return { send: (bytes) => printBluetooth(address, bytes) };
 }

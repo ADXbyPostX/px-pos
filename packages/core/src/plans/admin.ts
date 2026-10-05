@@ -57,12 +57,19 @@ export function updateClientPlan(ctx: PlanCtx, before: Client, patch: Partial<Cl
       auditOp(ctx, {
         action,
         target: { type: "client", id: ctx.cid, label: before.name },
-        before: pick(before as unknown as Record<string, unknown>, keys as string[]),
-        after: pick(patch as Record<string, unknown>, keys as string[]),
+        before: withoutLogo(pick(before as unknown as Record<string, unknown>, keys as string[])),
+        after: withoutLogo(pick(patch as Record<string, unknown>, keys as string[])),
       }),
     ],
     primaryPath: paths.client(ctx.cid),
   };
+}
+
+/** Audit entries never carry the receipt logo's pixels, only its size (like item photos). */
+function withoutLogo(o: Record<string, unknown>): Record<string, unknown> {
+  const r = o.receipt as Client["receipt"] | undefined;
+  if (!r || typeof r !== "object" || !("logo" in r)) return o;
+  return { ...o, receipt: { ...r, logo: r.logo ? `${r.logo.w}x${r.logo.h} dots` : null } };
 }
 
 /** A platform admin as their till sign-in needs them. */

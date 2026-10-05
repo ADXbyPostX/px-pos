@@ -36,7 +36,8 @@ class DisplayLineRecord : Record {
  * POS hardware on the terminal itself: a USB receipt printer (any device exposing a
  * USB printer-class interface, e.g. the Aclas board inside the TVS TP-482C) fed raw
  * ESC/POS bytes, the cash drawer (a pulse sent through that printer) and the board's
- * customer display (CustomerDisplay). Printer jobs run one at a time on a background thread.
+ * customer display (CustomerDisplay). Bluetooth printers paired with the machine go through
+ * BluetoothPrinter. Printer jobs run one at a time on a background thread.
  */
 class PosHardwareModule : Module() {
   private val context: Context
@@ -47,6 +48,7 @@ class PosHardwareModule : Module() {
   // PIN checks get their own thread so a sign-in never waits behind a print job.
   private val crypto = Executors.newSingleThreadExecutor()
   private val display = CustomerDisplay()
+  private val bluetooth = BluetoothPrinter()
 
   override fun definition() = ModuleDefinition {
     Name("PosHardware")
@@ -139,6 +141,20 @@ class PosHardwareModule : Module() {
         return@AsyncFunction
       }
       display.test(lines.map { it.toLine() }) { promise.resolve(it) }
+    }
+
+    Function("bluetoothState") { bluetooth.state() }
+
+    Function("listBluetoothDevices") { bluetooth.bonded() }
+
+    AsyncFunction("printBluetooth") { address: String, bytes: ByteArray, promise: Promise ->
+      bluetooth.print(address, bytes) { e ->
+        when (e) {
+          null -> promise.resolve(null)
+          is SecurityException -> promise.reject("E_BT_DENIED", "Allow PX POS to use Nearby devices (Android settings › Apps › PX POS › Permissions)", e)
+          else -> promise.reject("E_BT_PRINT", e.message ?: "Bluetooth printing failed", e)
+        }
+      }
     }
 
     AsyncFunction("printUsb") { bytes: ByteArray, promise: Promise ->
