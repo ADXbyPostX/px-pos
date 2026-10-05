@@ -255,6 +255,24 @@ export function bulkTablesPlan(ctx: PlanCtx, i: { floorId: string; prefix: strin
 
 // ─── staff ──────────────────────────────────────────────────────────────────
 
+/**
+ * Super admin deletes an admin, in one batch: switched off for good (`deletedAtMs`, PIN dropped),
+ * removed from every client they managed, their till sign-in there switched off, audited per
+ * client. Their Firebase sign-in can't be removed from the browser, but without an active
+ * platformUsers doc it opens nothing (rules: isPlat). Super admins aren't deleted this way.
+ */
+export function deleteAdminPlan(nowMs: number, a: AdminPerson, assigned: Array<{ ctx: PlanCtx; name: string; adminUids: string[] }>): WritePlan {
+  const ops: PlanOp[] = [{ path: paths.platformUser(a.uid), op: "update", data: { active: false, deletedAtMs: nowMs, pinHash: del(), updatedAtMs: nowMs } }];
+  for (const { ctx, name, adminUids } of assigned) {
+    const after = adminUids.filter((u) => u !== a.uid);
+    ops.push({ path: paths.client(ctx.cid), op: "update", data: { adminUids: after, updatedAtMs: nowMs } });
+    const staff = adminStaffOp(ctx, a, false);
+    if (staff) ops.push(staff);
+    ops.push(auditOp(ctx, { action: "admin.delete", target: { type: "client", id: ctx.cid, label: name }, before: adminUids, after, reason: `${a.name} deleted` }));
+  }
+  return { label: `Delete ${a.name}`, ops, primaryPath: paths.platformUser(a.uid) };
+}
+
 /** Add or edit a staff member. A new `pinHash` replaces their till PIN (the audit says so, without the hash). */
 export function upsertStaffPlan(ctx: PlanCtx, id: string, s: Pick<Staff, "name" | "role" | "active"> & Partial<Pick<Staff, "phone" | "discountCapBps" | "pinHash">>, before?: Staff): WritePlan {
   const path = paths.doc(ctx.cid, "staff", id);

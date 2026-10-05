@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { presence, revokeTerminalPlan, SKEW_WARN_MS, terminalUpdatePlan, type Terminal } from "@px-pos/core";
+import { presence, revokeTerminalPlan, SKEW_WARN_MS, terminalUpdatePlan, type CatalogLayout, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { DataTable, type Column } from "@/components/shared/data-table";
@@ -17,10 +18,102 @@ import { usePrincipal } from "@/components/providers/principal-provider";
 import { useNow, type WithId } from "@/lib/firebase/hooks";
 import { ago } from "@/lib/format";
 import { useRunPlan } from "@/lib/run-plan";
+import { cn } from "@/lib/utils";
 
 export type TerminalRow = WithId<Terminal> & { cid: string; clientName?: string };
 
-/** Terminal list with presence, sync health and actions (rename, mode, revoke). */
+const LAYOUTS: Array<{ value: CatalogLayout; label: string }> = [
+  { value: "top", label: "Categories on top" },
+  { value: "side", label: "Categories on the side" },
+];
+
+/** A tiny picture of each menu layout (flat blocks, no images). */
+function LayoutPreview({ layout }: { layout: CatalogLayout }) {
+  const tiles = (n: number, cols: string) => (
+    <div className={cn("grid flex-1 gap-1", cols)}>
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="h-7 rounded-sm bg-muted-foreground/25" />
+      ))}
+    </div>
+  );
+  return (
+    <div aria-hidden className="flex h-28 flex-col gap-1.5 rounded-md border bg-background p-2">
+      {layout === "top" ? (
+        <>
+          <div className="flex gap-1">
+            {[10, 14, 12, 9].map((w, i) => (
+              <div key={i} className={cn("h-2.5 rounded-full", i === 0 ? "bg-primary/70" : "bg-muted-foreground/30")} style={{ width: `${w * 4}%` }} />
+            ))}
+          </div>
+          {tiles(9, "grid-cols-3")}
+        </>
+      ) : (
+        <div className="flex flex-1 gap-1.5">
+          <div className="flex w-1/3 flex-col gap-1">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className={cn("h-2.5 rounded-sm", i === 0 ? "bg-primary/70" : "bg-muted-foreground/30")} />
+            ))}
+          </div>
+          {tiles(6, "grid-cols-2")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Per-terminal settings (reach the till live). For now: how its menu is laid out. */
+function TerminalSettingsDialog({ terminal, onClose }: { terminal: TerminalRow | null; onClose: () => void }) {
+  const { planCtx } = usePrincipal();
+  const { run, pending } = useRunPlan();
+  const [catalog, setCatalog] = useState<CatalogLayout>(terminal?.catalog ?? "top");
+  // Fresh form each time it opens for a terminal — adjusted during render.
+  const [seen, setSeen] = useState<string | null>(null);
+  const key = terminal ? `${terminal.cid}/${terminal.id}` : null;
+  if (key !== seen) {
+    setSeen(key);
+    setCatalog(terminal?.catalog ?? "top");
+  }
+  return (
+    <FormDialog
+      open={terminal != null}
+      onOpenChange={(o) => !o && !pending && onClose()}
+      title={terminal ? `${terminal.name} settings` : "Terminal settings"}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={pending || !terminal || catalog === (terminal.catalog ?? "top")}
+            onClick={async () => {
+              if (!terminal) return;
+              if (await run(terminalUpdatePlan(planCtx(terminal.cid), terminal.id, { catalog }, terminal), "Settings saved")) onClose();
+            }}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-3 text-sm font-medium">Menu layout</legend>
+        <RadioGroup value={catalog} onValueChange={(v) => setCatalog(v as CatalogLayout)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {LAYOUTS.map((l) => (
+            <label key={l.value} htmlFor={`catalog-${l.value}`} className={cn("flex cursor-pointer flex-col gap-2 rounded-lg border p-3 hover:bg-muted/40", catalog === l.value && "border-primary bg-primary/5")}>
+              <LayoutPreview layout={l.value} />
+              <span className="flex items-center gap-2 text-sm">
+                <RadioGroupItem id={`catalog-${l.value}`} value={l.value} />
+                {l.label}
+              </span>
+            </label>
+          ))}
+        </RadioGroup>
+      </fieldset>
+    </FormDialog>
+  );
+}
+
+/** Terminal list with presence, sync health and actions (settings, rename, mode, revoke). */
 export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow[]; showClient?: boolean }) {
   const now = useNow(30_000);
   const { planCtx } = usePrincipal();
@@ -28,6 +121,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
   const [renaming, setRenaming] = useState<TerminalRow | null>(null);
   const [newName, setNewName] = useState("");
   const [revoking, setRevoking] = useState<TerminalRow | null>(null);
+  const [settingsFor, setSettingsFor] = useState<TerminalRow | null>(null);
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
@@ -87,6 +181,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setSettingsFor(t)}>Settings</DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
                   setNewName(t.name);
@@ -163,6 +258,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
         </Field>
         <FormError error={err} />
       </FormDialog>
+      <TerminalSettingsDialog terminal={settingsFor} onClose={() => setSettingsFor(null)} />
       {revoking ? (
         <ConfirmDialog
           open={Boolean(revoking)}

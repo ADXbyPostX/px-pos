@@ -53,6 +53,11 @@ export interface PlatformUser extends Meta {
   active: boolean;
   /** Till PIN (formatPinHash). Copied to a staff entry in every client the admin is assigned to. */
   pinHash?: string;
+  /**
+   * Deleted by a super admin: hidden from the Admins page and never active again. The record stays
+   * (nothing is hard-deleted) so audit entries still resolve to a name.
+   */
+  deletedAtMs?: number;
 }
 
 export interface Bootstrap {
@@ -168,6 +173,9 @@ export interface PrinterTarget {
   width: 58 | 80;
 }
 
+/** How the till lays out its menu: category chips across the top, or a category list down the left. */
+export type CatalogLayout = "top" | "side";
+
 export interface Terminal extends Meta {
   /** One char, unique per client, never reused: "1".."9", "A".."Z". */
   code: string;
@@ -183,6 +191,8 @@ export interface Terminal extends Meta {
   lastOrder: { d: BizDate; n: number };
   lastToken: { d: BizDate; n: number };
   printers: { receipt?: PrinterTarget; kot?: PrinterTarget };
+  /** Admin › Terminals › Settings. Missing = "top". */
+  catalog?: CatalogLayout;
   platform?: "android" | "ios";
   model?: string;
   appVersion?: string;

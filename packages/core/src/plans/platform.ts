@@ -106,7 +106,7 @@ export function revokeTerminalPlan(ctx: PlanCtx, t: { id: string; authUid: strin
   };
 }
 
-export function terminalUpdatePlan(ctx: PlanCtx, tid: string, patch: Partial<Pick<Terminal, "name" | "mode" | "printers">>, before?: Partial<Terminal>): WritePlan {
+export function terminalUpdatePlan(ctx: PlanCtx, tid: string, patch: Partial<Pick<Terminal, "name" | "mode" | "printers" | "catalog">>, before?: Partial<Terminal>): WritePlan {
   return {
     label: "Update terminal",
     ops: [

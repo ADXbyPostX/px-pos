@@ -35,7 +35,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
   const session = usePaired();
   const data = useData();
   const { operator } = useOperator();
-  const { size } = useBreakpoint();
+  const { size, width: screenW } = useBreakpoint();
   const t = useTicket({ ticketId, orderId, mode, init });
   const [category, setCategory] = useState("all");
   const [paying, setPaying] = useState(false);
@@ -272,6 +272,11 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
     <TicketPanel className={className} title={title} subtitle={subtitle} order={order} lines={t.ticket.lines} bill={shownBill} onQty={t.setQty} actions={actions} headerAction={holdButton} {...(onBack ? { onBack } : {})} />
   );
 
+  // Menu layout (admin › Terminals › Settings): category chips on top, or a list down the left
+  // sized to the screen (~30% on phones, 184 dp on tablets); ItemGrid fits columns to what's left.
+  const side = session.terminal.catalog === "side";
+  const sideW = size === "phone" ? Math.round(Math.min(184, Math.max(112, screenW * 0.3))) : 184;
+
   // Phones: menu full width with a cart bar; the ticket and payment each take the whole screen.
   if (size === "phone") {
     if (paying)
@@ -292,8 +297,17 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
     const qty = shownBill.itemQty;
     return (
       <View className="flex-1">
-        <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} />
-        <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={136} />
+        {side ? (
+          <View className="flex-1 flex-row">
+            <CategoryRail categories={data.categories} value={category} onChange={setCategory} counts={counts} width={sideW} />
+            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={150} />
+          </View>
+        ) : (
+          <>
+            <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} />
+            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={136} />
+          </>
+        )}
         {noticeBar}
         <View className="flex-row gap-2 border-t border-border bg-background p-2">
           {canHold && (hasNew || held.length > 0) ? <HoldButton square count={held.length} onPress={() => setHoldOpen(true)} /> : null}
@@ -321,13 +335,13 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
 
   return (
     <View className="flex-1 flex-row">
-      {size === "tabletL" && !paying ? <CategoryRail categories={data.categories} value={category} onChange={setCategory} counts={counts} /> : null}
+      {side && !paying ? <CategoryRail categories={data.categories} value={category} onChange={setCategory} counts={counts} width={sideW} /> : null}
       <View className="flex-1">
         {paying ? (
           payPanel
         ) : (
           <>
-            {size !== "tabletL" ? <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} /> : null}
+            {side ? null : <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} />}
             <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={156} />
           </>
         )}

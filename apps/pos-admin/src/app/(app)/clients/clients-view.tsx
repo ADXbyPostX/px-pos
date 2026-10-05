@@ -48,6 +48,8 @@ export function ClientsView() {
 
   const admins = useCollection<PlatformUser>(isSuper ? "platformUsers:admins" : null, (db) => query(collection(db, paths.platformUsers()), where("role", "==", "admin")));
   const adminName = useMemo(() => new Map(admins.data.map((a) => [a.id, a.name])), [admins.data]);
+  // Deleted admins can't be assigned again (their names still resolve above for history).
+  const assignable = useMemo(() => admins.data.filter((a) => !a.deletedAtMs), [admins.data]);
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -205,7 +207,8 @@ export function ClientsView() {
                       size="sm"
                       disabled={pending}
                       onClick={async () => {
-                        const ok = await run(assignAdminsPlan(planCtx(selected.id), selected.name, selected.adminUids, draft), "Admins updated");
+                        const people = assignable.map((a) => ({ uid: a.id, name: a.name, active: a.active, ...(a.pinHash ? { pinHash: a.pinHash } : {}) }));
+                        const ok = await run(assignAdminsPlan(planCtx(selected.id), selected.name, selected.adminUids, draft, people), "Admins updated");
                         if (ok) setDraftAdmins(null);
                       }}
                     >
@@ -214,7 +217,7 @@ export function ClientsView() {
                   ) : null
                 }
               >
-                {admins.data.length === 0 ? (
+                {assignable.length === 0 ? (
                   <p className="px-4 py-4 text-sm text-muted-foreground">
                     No admins yet.{" "}
                     <Link href="/admins" className="text-foreground underline-offset-4 hover:underline">
@@ -223,7 +226,7 @@ export function ClientsView() {
                   </p>
                 ) : (
                   <ul className="divide-y">
-                    {[...admins.data].sort((a, b) => a.name.localeCompare(b.name)).map((a) => {
+                    {[...assignable].sort((a, b) => a.name.localeCompare(b.name)).map((a) => {
                       const id = `assign-${a.id}`;
                       return (
                         <li key={a.id} className="flex min-h-11 items-center gap-3 px-4">

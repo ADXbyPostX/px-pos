@@ -38,7 +38,7 @@ export function NavUser() {
   const canPreview = devToolsEnabled && principal?.role === "superadmin";
   // Equality-only query (no composite index); sorted client-side.
   const adminsLive = useCollection<PlatformUser>(canPreview ? "platformUsers:admins" : null, (db) => query(collection(db, paths.platformUsers()), where("role", "==", "admin")));
-  const admins = { ...adminsLive, data: [...adminsLive.data].sort((a, b) => a.name.localeCompare(b.name)) };
+  const admins = { ...adminsLive, data: adminsLive.data.filter((a) => !a.deletedAtMs).sort((a, b) => a.name.localeCompare(b.name)) };
 
   if (!principal) return null;
   const email = auth.user?.email;

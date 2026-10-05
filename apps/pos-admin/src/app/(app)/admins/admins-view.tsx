@@ -2,9 +2,9 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { collection, query } from "firebase/firestore";
-import { Copy, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, ShieldOff } from "lucide-react";
+import { Copy, KeyRound, Loader2, Plus, RefreshCw, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { adminTillPlan, assignAdminsPlan, combinePlans, paths, platformUserPlan, validatePin, type AdminPerson, type PlanCtx, type PlatformRole, type PlatformUser } from "@px-pos/core";
+import { adminTillPlan, assignAdminsPlan, combinePlans, deleteAdminPlan, paths, platformUserPlan, validatePin, type AdminPerson, type PlanCtx, type PlatformRole, type PlatformUser } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { Empty } from "@/components/shared/empty";
 import { Field } from "@/components/shared/field";
 import { FormDialog } from "@/components/shared/form-dialog";
 import { FormError, SelectField } from "@/components/shared/form-controls";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { Loadable } from "@/components/shared/loadable";
 import { PinInput, PinReveal } from "@/components/shared/pin-input";
 import { PageHeader } from "@/components/shared/page-header";
@@ -25,6 +26,7 @@ import { UserChip } from "@/components/shared/user-avatar";
 import { authMessage } from "@/components/providers/firebase-provider";
 import { usePrincipal } from "@/components/providers/principal-provider";
 import { useClients } from "@/hooks/use-clients";
+import { applyPlan, firestoreMessage } from "@/lib/firebase/apply-plan";
 import { createLogin } from "@/lib/firebase/client";
 import { useCollection, type WithId } from "@/lib/firebase/hooks";
 import { cryptoRand } from "@/lib/ids";
@@ -50,7 +52,7 @@ function tempPassword(): string {
  * New admin = a real email + password sign-in (created without signing you out) and the
  * platformUsers doc under the same uid. Hand over the details; they change the password.
  */
-function AddAdminDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function AddAdminDialog({ open, onOpenChange, deletedEmails }: { open: boolean; onOpenChange: (o: boolean) => void; deletedEmails: string[] }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState(tempPassword);
@@ -95,7 +97,13 @@ function AddAdminDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "";
       setCreating(false);
-      return setError(code === "auth/email-already-in-use" ? "That email already has a PX POS sign-in." : authMessage(err));
+      if (code !== "auth/email-already-in-use") return setError(authMessage(err));
+      // A deleted admin's sign-in still exists (the browser can't remove it): say so plainly.
+      return setError(
+        deletedEmails.includes(email.trim().toLowerCase())
+          ? "That email belonged to a deleted admin. Use another email, or delete the old sign-in in Firebase console → Authentication first."
+          : "That email already has a PX POS sign-in.",
+      );
     }
     setCreating(false);
     const ok = await run(platformUserPlan({ uid, role, name: name.trim(), email: email.trim(), active: true, nowMs: Date.now(), create: true, ...(pinHash ? { pinHash } : {}) }), `${name.trim()} added`);
@@ -257,10 +265,13 @@ export function AdminsView() {
   const clients = useClients();
   const live = useCollection<PlatformUser>(isSuper ? "platformUsers:all" : null, (db) => query(collection(db, paths.platformUsers())));
   // Super admins first, then admins; the assignment matrix is for admins only (super admins see everything).
-  const people = useMemo(() => [...live.data].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === "superadmin" ? -1 : 1)), [live.data]);
+  // Deleted admins stay on record (audit names) but are gone from this page.
+  const deleted = useMemo(() => live.data.filter((a) => a.deletedAtMs), [live.data]);
+  const people = useMemo(() => [...live.data.filter((a) => !a.deletedAtMs)].sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === "superadmin" ? -1 : 1)), [live.data]);
   const admins = useMemo(() => people.filter((a) => a.role === "admin"), [people]);
   const [adding, setAdding] = useState(false);
   const [pinFor, setPinFor] = useState<Admin | null>(null);
+  const [deleting, setDeleting] = useState<Admin | null>(null);
   const [draft, setDraft] = useState<Record<string, string[]>>({});
   const { run, pending } = useRunPlan();
 
@@ -324,7 +335,29 @@ export function AdminsView() {
         />
       ),
     },
+    {
+      key: "delete",
+      header: <span className="sr-only">Delete</span>,
+      align: "right",
+      headClassName: "w-12",
+      cell: (a) =>
+        a.role === "admin" ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleting(a);
+            }}
+            aria-label={`Delete ${a.name}`}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        ) : null,
+    },
   ];
+  const deletingClients = deleting ? clients.data.filter((c) => c.adminUids.includes(deleting.id)) : [];
 
   return (
     <>
@@ -421,7 +454,35 @@ export function AdminsView() {
           </div>
         )}
       </Loadable>
-      <AddAdminDialog open={adding} onOpenChange={setAdding} />
+      <AddAdminDialog open={adding} onOpenChange={setAdding} deletedEmails={deleted.flatMap((a) => (a.email ? [a.email.toLowerCase()] : []))} />
+      <ConfirmDialog
+        open={deleting != null}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title={deleting ? `Delete ${deleting.name}?` : "Delete admin?"}
+        confirmLabel="Delete admin"
+        description={
+          deleting ? (
+            <>
+              <p>
+                They can no longer sign in to PX POS Admin or any till
+                {deletingClients.length ? `, and they're removed from ${deletingClients.map((c) => c.name).join(", ")}` : ""}. Orders and history they recorded stay.
+              </p>
+              <p className="mt-2">This can&apos;t be undone; you can add them again as a new admin with another email.</p>
+            </>
+          ) : null
+        }
+        onConfirm={async () => {
+          if (!deleting) return;
+          try {
+            await applyPlan(deleteAdminPlan(Date.now(), person(deleting), deletingClients.map((c) => ({ ctx: planCtx(c.id), name: c.name, adminUids: c.adminUids }))));
+          } catch (e) {
+            throw new Error(firestoreMessage(e));
+          }
+          // Drop any unsaved assignment edits that mention them.
+          setDraft((d) => Object.fromEntries(Object.entries(d).map(([cid, uids]) => [cid, uids.filter((u) => u !== deleting.id)])));
+          toast.success(`${deleting.name} deleted`);
+        }}
+      />
       <AdminPinDialog admin={pinFor} assigned={pinFor ? assignedCtxs(pinFor.id) : []} onOpenChange={(o) => !o && setPinFor(null)} />
     </>
   );

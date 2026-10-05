@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { kitchenOn, printsKots } from "../src/kot";
 import { adminStaffId, formatPinHash, parsePinHash, sameHash, validatePin } from "../src/pin";
-import { adminTillPlan, assignAdminsPlan, upsertStaffPlan, type AdminPerson } from "../src/plans/admin";
+import { adminTillPlan, assignAdminsPlan, deleteAdminPlan, upsertStaffPlan, type AdminPerson } from "../src/plans/admin";
 import { kotPlan } from "../src/plans/order";
 import type { PlanCtx } from "../src/plans/types";
 import type { OrderLine } from "../src/types";
@@ -101,5 +101,27 @@ describe("kitchen switch", () => {
     expect(make()?.status).toBe("new");
     expect(make(false)?.status).toBe("served");
     expect(make(false)?.statusAtMs).toEqual({ new: 1_000, served: 1_000 });
+  });
+});
+
+describe("delete admin", () => {
+  it("switches them off for good, unassigns every client and their till sign-in, one batch", () => {
+    const a: AdminPerson = { uid: "u1", name: "Ravi", active: true, pinHash: HASH };
+    const p = deleteAdminPlan(5_000, a, [
+      { ctx: ctxFor("tr"), name: "Tea Room", adminUids: ["u1", "u9"] },
+      { ctx: ctxFor("cafe"), name: "Cafe", adminUids: ["u1"] },
+    ]);
+    const user = p.ops.find((o) => o.path === "platformUsers/u1");
+    expect(user?.op).toBe("update");
+    expect(user?.data).toMatchObject({ active: false, deletedAtMs: 5_000, pinHash: { $delete: true } });
+    expect(p.ops.find((o) => o.path === "clients/tr")?.data.adminUids).toEqual(["u9"]);
+    expect(p.ops.find((o) => o.path === "clients/cafe")?.data.adminUids).toEqual([]);
+    expect(p.ops.filter((o) => o.path.endsWith("/staff/adm_u1")).map((o) => o.data.active)).toEqual([false, false]);
+    expect(p.ops.filter((o) => o.path.includes("/auditLog/"))).toHaveLength(2);
+    expect(JSON.stringify(p.ops.filter((o) => o.path.includes("/auditLog/")))).not.toContain(HASH);
+  });
+  it("an admin without a PIN or clients is just switched off", () => {
+    const p = deleteAdminPlan(5_000, { uid: "u2", name: "Asha", active: true }, []);
+    expect(p.ops.map((o) => o.path)).toEqual(["platformUsers/u2"]);
   });
 });
