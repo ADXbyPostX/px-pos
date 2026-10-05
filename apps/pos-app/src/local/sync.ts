@@ -1,7 +1,7 @@
 import { doc, getDocFromServer, waitForPendingWrites } from "@react-native-firebase/firestore";
 import { getDb } from "@/firebase";
 import { applyPlan } from "@/firebase/apply-plan";
-import { journalCounts, journalRows, markJournal, pruneJournal, type JournalRow } from "./db";
+import { getMeta, journalCounts, journalRows, markJournal, pruneJournal, resetLocalNumbering, setMeta, type JournalRow } from "./db";
 
 /**
  * Hands journalled plans to Firestore and records the server's verdict.
@@ -18,6 +18,19 @@ export function onJournalChange(l: Listener): () => void {
 }
 function emit() {
   for (const l of listeners) l();
+}
+
+/**
+ * Apply admin's "Restart numbering" once per request (`terminal.countersResetAtMs`). Runs before
+ * the boot reconcile and the counter seeding, so neither sees the cleared sales.
+ */
+export function applyNumberingRestart(tid: string, atMs: number | undefined): boolean {
+  const key = `numbersReset:${tid}`;
+  if (!atMs || atMs <= Number(getMeta(key) ?? 0)) return false;
+  resetLocalNumbering(tid);
+  setMeta(key, String(atMs));
+  emit();
+  return true;
 }
 
 function errorText(e: unknown): string {

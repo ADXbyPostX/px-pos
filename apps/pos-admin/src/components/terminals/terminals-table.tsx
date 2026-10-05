@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { presence, revokeTerminalPlan, SKEW_WARN_MS, terminalUpdatePlan, type CatalogLayout, type Terminal } from "@px-pos/core";
+import { collection, getDocsFromServer, limit, query, where } from "firebase/firestore";
+import { fyFor, paths, presence, restartNumberingPlan, revokeTerminalPlan, SKEW_WARN_MS, terminalUpdatePlan, type CatalogLayout, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ import { FormDialog } from "@/components/shared/form-dialog";
 import { FormError } from "@/components/shared/form-controls";
 import { ActiveBadge, Flag, PresenceBadge } from "@/components/shared/status-badge";
 import { usePrincipal } from "@/components/providers/principal-provider";
+import { getDb } from "@/lib/firebase/client";
 import { useNow, type WithId } from "@/lib/firebase/hooks";
 import { ago } from "@/lib/format";
 import { useRunPlan } from "@/lib/run-plan";
@@ -116,7 +118,8 @@ function TerminalSettingsDialog({ terminal, onClose }: { terminal: TerminalRow |
 /** Terminal list with presence, sync health and actions (settings, rename, mode, revoke). */
 export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow[]; showClient?: boolean }) {
   const now = useNow(30_000);
-  const { planCtx } = usePrincipal();
+  const { planCtx, isSuper } = usePrincipal();
+  const [restarting, setRestarting] = useState<TerminalRow | null>(null);
   const { run, pending } = useRunPlan();
   const [renaming, setRenaming] = useState<TerminalRow | null>(null);
   const [newName, setNewName] = useState("");
@@ -194,6 +197,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
               <DropdownMenuItem onSelect={() => void run(terminalUpdatePlan(planCtx(t.cid), t.id, { mode: t.mode === "kds" ? "pos" : "kds" }, t), "Terminal updated")}>
                 {t.mode === "kds" ? "Use for billing" : "Use as kitchen display"}
               </DropdownMenuItem>
+              {isSuper ? <DropdownMenuItem onSelect={() => setRestarting(t)}>Restart numbering</DropdownMenuItem> : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
@@ -259,6 +263,23 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
         <FormError error={err} />
       </FormDialog>
       <TerminalSettingsDialog terminal={settingsFor} onClose={() => setSettingsFor(null)} />
+      {restarting ? (
+        <ConfirmDialog
+          open={Boolean(restarting)}
+          onOpenChange={(o) => !o && setRestarting(null)}
+          title={`Restart numbering on ${restarting.name}?`}
+          description={`For going live after test sales are cleared: bills start again at ${restarting.series}/${fyFor(now)}/000001, and KOTs, orders and tokens at 1. The till drops its leftover test tickets.`}
+          confirmLabel="Restart numbering"
+          onConfirm={async () => {
+            // GST: a series never repeats a number. Only allowed once its bills are gone.
+            const fy = fyFor(now);
+            const left = await getDocsFromServer(query(collection(getDb(), paths.col(restarting.cid, "invoices")), where("series", "==", restarting.series), where("fy", "==", fy), limit(1)));
+            if (!left.empty) throw new Error(`Bills in series ${restarting.series} for ${fy} still exist. Clear the test sales first.`);
+            const ok = await run(restartNumberingPlan(planCtx(restarting.cid), restarting), "Numbering restarted");
+            if (!ok) throw new Error("Couldn't restart the numbering.");
+          }}
+        />
+      ) : null}
       {revoking ? (
         <ConfirmDialog
           open={Boolean(revoking)}

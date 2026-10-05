@@ -1,4 +1,4 @@
-import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, use, useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
@@ -9,6 +9,7 @@ import { pairingCode, paths, type Client, type Member, type PairingRequest, type
 import { getAuthInstance, getDb } from "@/firebase";
 import { useLiveDoc, type WithId } from "@/hooks/use-live";
 import { counterKey, getMeta, journalCounts, seedCounter, setMeta } from "@/local/db";
+import { applyNumberingRestart } from "@/local/sync";
 
 export const APP_VERSION = (Constants.expoConfig?.version as string | undefined) ?? "0.1.0";
 
@@ -184,6 +185,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const client = useLiveDoc<Client>(pairing ? paths.client(pairing.cid) : null);
   const terminal = useLiveDoc<Terminal>(pairing ? paths.terminal(pairing.cid, pairing.tid) : null);
   const member = useLiveDoc<Member>(pairing && uid ? paths.member(pairing.cid, uid) : null);
+
+  // Numbering restarted from admin: drop local counters first. A layout effect, so it runs before
+  // any passive effect (the seeding below, the boot reconcile and heartbeat in SyncProvider).
+  const resetAtMs = terminal.data?.countersResetAtMs;
+  useLayoutEffect(() => {
+    if (pairing) applyNumberingRestart(pairing.tid, resetAtMs);
+  }, [resetAtMs, pairing]);
 
   // First time paired: continue this terminal's numbering from what the server knows.
   useEffect(() => {

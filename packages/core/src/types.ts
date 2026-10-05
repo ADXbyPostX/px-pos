@@ -205,6 +205,8 @@ export interface Terminal extends Meta {
   printers: { receipt?: PrinterTarget; kot?: PrinterTarget };
   /** Admin › Terminals › Settings. Missing = "top". */
   catalog?: CatalogLayout;
+  /** Super admin restarted numbering (after clearing test sales); the till drops its local counters once. */
+  countersResetAtMs?: number;
   platform?: "android" | "ios";
   model?: string;
   appVersion?: string;

@@ -1,4 +1,5 @@
 import { paths } from "../paths";
+import { fyFor } from "../time";
 import type { Terminal } from "../types";
 import { auditOp, meta } from "./common";
 import { serverTs } from "./types";
@@ -114,6 +115,23 @@ export function terminalUpdatePlan(ctx: PlanCtx, tid: string, patch: Partial<Pic
       auditOp(ctx, { action: "terminal.update", target: { type: "terminal", id: tid, label: before?.name }, before: before ? pickKeys(before, Object.keys(patch)) : undefined, after: patch }),
     ],
     primaryPath: paths.terminal(ctx.cid, tid),
+  };
+}
+
+/**
+ * Start a terminal's numbers again (super admin, once its test sales are cleared): bills from
+ * 000001 in this financial year, KOTs, orders and tokens from 1. The till sees `countersResetAtMs`
+ * and drops its own counters, journal and drafts (pos-app `applyNumberingRestart`).
+ */
+export function restartNumberingPlan(ctx: PlanCtx, t: Pick<Terminal, "name" | "series" | "lastInvoiceSeq" | "lastInvoiceFy"> & { id: string }): WritePlan {
+  const zero = { d: "", n: 0 };
+  return {
+    label: `Restart numbering on ${t.name}`,
+    ops: [
+      { path: paths.terminal(ctx.cid, t.id), op: "update", data: { lastInvoiceSeq: 0, lastInvoiceFy: fyFor(ctx.nowMs), lastKot: zero, lastOrder: zero, lastToken: zero, countersResetAtMs: ctx.nowMs, updatedAtMs: ctx.nowMs } },
+      auditOp(ctx, { action: "terminal.restartNumbering", target: { type: "terminal", id: t.id, label: t.name }, before: { series: t.series, lastInvoiceSeq: t.lastInvoiceSeq, lastInvoiceFy: t.lastInvoiceFy } }),
+    ],
+    primaryPath: paths.terminal(ctx.cid, t.id),
   };
 }
 

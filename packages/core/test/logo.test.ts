@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeBill } from "../src/bill";
 import { decodeBase64, encodeBase64, logoRows, validateReceiptLogo } from "../src/logo";
 import { updateClientPlan } from "../src/plans/admin";
+import { restartNumberingPlan } from "../src/plans/platform";
 import type { PlanCtx } from "../src/plans/types";
 import { renderInvoice, renderKot, receiptText, type InvoicePrint } from "../src/receipt";
 import type { Client, ReceiptLogo } from "../src/types";
@@ -56,8 +57,9 @@ describe("receipt logo", () => {
     const plain = renderInvoice(print, { header: [], footer: [], showSac: false }, { copy: "ORIGINAL", cols: 32 });
     const lines = renderInvoice(print, { header: [], footer: [], showSac: false, logo }, { copy: "ORIGINAL", cols: 32 });
     expect(lines[0]).toEqual({ kind: "image", logo });
+    expect(lines[1]).toEqual({ kind: "feed", lines: 1 }); // a gap before the address
     expect(lines.filter((l) => l.kind === "image")).toHaveLength(1);
-    expect(lines.slice(1)).toEqual(plain.slice(1)); // the name goes; address and the rest stay
+    expect(lines.slice(2)).toEqual(plain.slice(1)); // the name goes; address and the rest stay
     expect(plain[0]).toMatchObject({ kind: "text", text: "Tea Room" });
     expect(receiptText(lines, 32)).not.toContain("Tea Room");
     const kot = renderKot({ kotNo: "1-0001", kind: "new", mode: "quick", where: "Token 1", station: "beverage", items: [{ lineId: "a", name: "Tea", qty: 1 }], atMs: 0 } as never, { cols: 32 });
@@ -84,5 +86,14 @@ describe("receipt logo", () => {
     const audit = p.ops.find((o) => o.path.includes("/auditLog/"));
     expect(JSON.stringify(audit?.data)).not.toContain(logo.data);
     expect(((audit?.data.after as Record<string, unknown>).receipt as Record<string, unknown>).logo).toBe("384x120 dots");
+  });
+});
+
+describe("restart numbering", () => {
+  it("zeroes the terminal's numbers for this FY and audits what they were", () => {
+    const ctx: PlanCtx = { cid: "tr", nowMs: Date.parse("2026-10-05T10:00:00Z"), actorId: "boss", actorKind: "platform", source: "admin", newId: () => "a1" };
+    const p = restartNumberingPlan(ctx, { id: "t1", name: "Counter 1", series: "1", lastInvoiceSeq: 14, lastInvoiceFy: "26-27" });
+    expect(p.ops[0]).toMatchObject({ path: "clients/tr/terminals/t1", op: "update", data: { lastInvoiceSeq: 0, lastInvoiceFy: "26-27", lastKot: { d: "", n: 0 }, lastToken: { d: "", n: 0 }, countersResetAtMs: ctx.nowMs } });
+    expect(p.ops[1]?.data).toMatchObject({ action: "terminal.restartNumbering", before: { lastInvoiceSeq: 14 } });
   });
 });

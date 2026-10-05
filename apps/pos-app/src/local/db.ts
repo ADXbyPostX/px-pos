@@ -80,6 +80,24 @@ export function peekCounter(key: string): number {
   return localDb().getFirstSync<{ value: number }>("SELECT value FROM counters WHERE key = ?", key)?.value ?? 0;
 }
 
+/**
+ * Numbering restarted from admin (test sales cleared): this terminal's counters go, and so do the
+ * journal, drafts (held tickets) and print jobs of the cleared sales — replaying them would bring
+ * the test orders back.
+ */
+export function resetLocalNumbering(tid: string): void {
+  const d = localDb();
+  d.withTransactionSync(() => {
+    for (const kind of ["inv", "kot", "ord", "tok"]) {
+      const prefix = `${kind}:${tid}:`;
+      d.runSync("DELETE FROM counters WHERE substr(key, 1, ?) = ?", prefix.length, prefix);
+    }
+    d.runSync("DELETE FROM journal");
+    d.runSync("DELETE FROM drafts");
+    d.runSync("DELETE FROM print_queue");
+  });
+}
+
 /** Raise a counter to at least `min` (pairing / re-pair seeding). Never lowers it. */
 export function seedCounter(key: string, min: number): void {
   localDb().runSync("INSERT INTO counters (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)", key, min);

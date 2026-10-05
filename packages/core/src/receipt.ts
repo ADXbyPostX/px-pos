@@ -135,7 +135,7 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   const out: ReceiptLine[] = [];
   const s = inv.supplier;
   // The logo replaces the name (Mandy, 2026-10-05); address, GSTIN and FSSAI still follow.
-  if (settings.logo && settings.showLogo !== false && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo });
+  if (settings.logo && settings.showLogo !== false && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo }, { kind: "feed", lines: 1 });
   else out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
   for (const l of wrap(s.address, cols)) out.push(center(l));
   if (s.phone) out.push(center(`Ph: ${s.phone}`));
