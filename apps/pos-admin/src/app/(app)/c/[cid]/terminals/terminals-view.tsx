@@ -12,10 +12,13 @@ import { PairDialog } from "@/components/terminals/pair-dialog";
 import { PendingRequests } from "@/components/terminals/pending-requests";
 import { TerminalsTable, type TerminalRow } from "@/components/terminals/terminals-table";
 import { useClient } from "@/components/providers/client-provider";
+import { usePrincipal } from "@/components/providers/principal-provider";
 import { useCollection, useNow } from "@/lib/firebase/hooks";
 
 export function ClientTerminalsView() {
   const { cid, client } = useClient();
+  // Pairing devices is the super admin's alone (rules enforce it); admins manage paired ones.
+  const { isSuper } = usePrincipal();
   const now = useNow(30_000);
   const live = useCollection<Terminal>(`terminals:${cid}`, (db) => query(collection(db, paths.col(cid, "terminals"))));
   const [pairOpen, setPairOpen] = useState(false);
@@ -29,16 +32,18 @@ export function ClientTerminalsView() {
       <PageHeader
         title="Terminals"
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setCode(undefined);
-              setPairOpen(true);
-            }}
-          >
-            <Plus data-icon="inline-start" aria-hidden />
-            Pair terminal
-          </Button>
+          isSuper ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                setCode(undefined);
+                setPairOpen(true);
+              }}
+            >
+              <Plus data-icon="inline-start" aria-hidden />
+              Pair terminal
+            </Button>
+          ) : null
         }
       />
       <Stats>
@@ -56,11 +61,15 @@ export function ClientTerminalsView() {
       <Loadable
         state={{ ...live, data: rows }}
         onRetry={live.retry}
-        empty={{ icon: Tablet, label: "No terminals yet. Install PX POS on a tablet, open it, and pair the code it shows.", action: <Button size="sm" onClick={() => setPairOpen(true)}>Pair terminal</Button> }}
+        empty={
+          isSuper
+            ? { icon: Tablet, label: "No terminals yet. Install PX POS on a tablet, open it, and pair the code it shows.", action: <Button size="sm" onClick={() => setPairOpen(true)}>Pair terminal</Button> }
+            : { icon: Tablet, label: "No terminals yet. The super admin pairs this outlet's tablets." }
+        }
       >
         {(data) => <TerminalsTable rows={data} />}
       </Loadable>
-      <PairDialog open={pairOpen} onOpenChange={setPairOpen} client={client} terminals={live.data} initialCode={code} />
+      {isSuper ? <PairDialog open={pairOpen} onOpenChange={setPairOpen} client={client} terminals={live.data} initialCode={code} /> : null}
     </>
   );
 }

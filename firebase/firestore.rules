@@ -76,8 +76,9 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.keys().hasOnly(['code', 'deviceName', 'model', 'platform', 'appVersion', 'status', 'createdAtMs', 'updatedAtMs'])
         && request.resource.data.code is string && request.resource.data.code.size() == 13;
-      allow get: if authed() && (uid() == u || isPlat());
-      allow list: if isPlat();
+      // Only the super admin sees, pairs or rejects devices (Mandy, 2026-10-05); admins can't.
+      allow get: if authed() && (uid() == u || isSuper());
+      allow list: if isSuper();
       allow update: if
         // The tablet may refresh its own (unpaired) request, e.g. a new code after a rejection.
         (authed() && uid() == u && resource.data.status != 'paired'
@@ -90,9 +91,9 @@ service cloud.firestore {
           && request.resource.data.status == 'pending'
           && request.resource.data.keys().hasOnly(['code', 'deviceName', 'model', 'platform', 'appVersion', 'status', 'createdAtMs', 'updatedAtMs'])
           && request.resource.data.code is string && request.resource.data.code.size() == 13)
-        // An admin rejects, or pairs into a client they manage.
-        || (isPlat() && request.resource.data.status == 'rejected' && changed().hasOnly(['status', 'updatedAtMs']))
-        || (isPlat() && request.resource.data.status == 'paired' && canManage(request.resource.data.cid));
+        // The super admin rejects, or pairs into any client.
+        || (isSuper() && request.resource.data.status == 'rejected' && changed().hasOnly(['status', 'updatedAtMs']))
+        || (isSuper() && request.resource.data.status == 'paired');
     }
 
     // ── tenants ─────────────────────────────────────────────────────────────
@@ -111,7 +112,11 @@ service cloud.firestore {
       }
 
       // Setup (pos-admin only).
-      match /members/{u}     { allow create, update: if canManage(c); }
+      // Pairing (creating or re-enabling a member) is the super admin's; an admin may only switch one off (revoke).
+      match /members/{u} {
+        allow create: if isSuper();
+        allow update: if isSuper() || (isAdminOf(c) && request.resource.data.active == false && changed().hasOnly(['active', 'updatedAtMs']));
+      }
       match /staff/{id}      { allow create, update: if canManage(c); }
       match /categories/{id} { allow create, update: if canManage(c); }
       match /floors/{id}     { allow create, update: if canManage(c); }
@@ -132,8 +137,12 @@ service cloud.firestore {
       }
 
       match /terminals/{t} {
-        allow create: if canManage(c);
-        allow update: if canManage(c)
+        allow create: if isSuper();
+        allow update: if isSuper()
+          // Admins: rename, settings, mode, printers; and revoke. Never its identity, numbering or un-revoking.
+          || (isAdminOf(c)
+              && !changed().hasAny(['authUid', 'code', 'series', 'status', 'revokedAtMs', 'pairedBy', 'pairedAtMs', 'lastInvoiceSeq', 'lastInvoiceFy']))
+          || (isAdminOf(c) && request.resource.data.status == 'revoked' && changed().hasOnly(['status', 'revokedAtMs', 'updatedAtMs']))
           || (isMember(c) && myTerminal(c) == t
               && changed().hasOnly(['lastSeenAt', 'lastSeenAtMs', 'clockSkewMs', 'appVersion', 'pendingWrites', 'journalRejected',
                                     'lastInvoiceSeq', 'lastInvoiceFy', 'lastKot', 'lastOrder', 'lastToken', 'printers', 'updatedAtMs'])

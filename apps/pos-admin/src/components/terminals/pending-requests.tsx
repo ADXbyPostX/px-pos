@@ -5,17 +5,19 @@ import { Tablet } from "lucide-react";
 import { paths, rejectPairingPlan, type PairingRequest } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/shared/panel";
+import { usePrincipal } from "@/components/providers/principal-provider";
 import { useCollection, useNow } from "@/lib/firebase/hooks";
 import { ago } from "@/lib/format";
 import { useRunPlan } from "@/lib/run-plan";
 
-/** Tablets currently showing a pairing code (any client may claim them). */
-export function usePendingRequests() {
-  return useCollection<PairingRequest>("pairingRequests:pending", (db) => query(collection(db, paths.pairingRequests()), where("status", "==", "pending")));
+/** Tablets currently showing a pairing code. Only the super admin may see (and pair) them. */
+export function usePendingRequests(enabled = true) {
+  return useCollection<PairingRequest>(enabled ? "pairingRequests:pending" : null, (db) => query(collection(db, paths.pairingRequests()), where("status", "==", "pending")));
 }
 
 export function PendingRequests({ onPair }: { onPair?: (code: string) => void }) {
-  const pending = usePendingRequests();
+  const { isSuper } = usePrincipal();
+  const pending = usePendingRequests(isSuper);
   const now = useNow(15_000);
   const { run } = useRunPlan();
   const rows = [...pending.data].sort((a, b) => b.createdAtMs - a.createdAtMs);

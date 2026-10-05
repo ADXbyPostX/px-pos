@@ -19,10 +19,12 @@ import {
   pairingRequestPlan,
   quickPlan,
   rebillPlan,
+  rejectPairingPlan,
   reopenBillPlan,
   revokeTerminalPlan,
   settlePlan,
   settleTenders,
+  terminalUpdatePlan,
   upsertItemPlan,
   zClosePlan,
 } from "@px-pos/core";
@@ -173,13 +175,29 @@ describe("tenancy", () => {
     await assertFails(deleteDoc(doc(db("super"), "clients/c1/itemPhotos/paneer")));
   });
 
-  it("pairing: a device requests, only an admin of that client can pair it", async () => {
+  it("pairing: a device requests, only the super admin can see, pair or reject it", async () => {
     await assertSucceeds(applyPlan(db("dev9"), pairingRequestPlan({ uid: "dev9", code: "PXP-ABCD-EFGH", deviceName: "Tab", model: "X", platform: "android", appVersion: "0.1.0", nowMs: NOW })));
     await assertFails(applyPlan(db("dev8"), pairingRequestPlan({ uid: "dev9", code: "PXP-ABCD-EFGH", deviceName: "Tab", model: "X", platform: "android", appVersion: "0.1.0", nowMs: NOW })));
-    const pair = pairPlan(adminCtx("adminB"), { requestUid: "dev9", terminalId: "t9", code: "9", name: "Bar", mode: "pos", series: "DC9", fy: "26-27" });
-    await assertFails(applyPlan(db("adminB"), pair));
-    await assertSucceeds(applyPlan(db("adminA"), pairPlan(adminCtx("adminA"), { requestUid: "dev9", terminalId: "t9", code: "9", name: "Bar", mode: "pos", series: "DC9", fy: "26-27" })));
+    const pairInput = { requestUid: "dev9", terminalId: "t9", code: "9", name: "Bar", mode: "pos" as const, series: "DC9", fy: "26-27" };
+    // Even an admin of c1 can't list, pair or reject.
+    await assertFails(getDocs(query(collection(db("adminA"), "pairingRequests"), where("status", "==", "pending"))));
+    await assertFails(getDoc(doc(db("adminA"), "pairingRequests/dev9")));
+    await assertFails(applyPlan(db("adminA"), pairPlan(adminCtx("adminA"), pairInput)));
+    await assertFails(applyPlan(db("adminA"), rejectPairingPlan(NOW, "dev9")));
+    await assertSucceeds(getDocs(query(collection(db("super"), "pairingRequests"), where("status", "==", "pending"))));
+    await assertSucceeds(applyPlan(db("super"), pairPlan(adminCtx("super"), pairInput)));
     await assertSucceeds(getDoc(doc(db("dev9"), "clients/c1")));
+  });
+
+  it("admins manage a paired terminal but can't re-pair, un-revoke or renumber it", async () => {
+    await assertSucceeds(applyPlan(db("adminA"), terminalUpdatePlan(adminCtx("adminA"), "t1", { name: "Front", catalog: "side" }, { name: "Counter" })));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/terminals/t1"), { authUid: "someone", updatedAtMs: NOW }));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/terminals/t1"), { lastInvoiceSeq: 99, updatedAtMs: NOW }));
+    await assertFails(setDoc(doc(db("adminA"), "clients/c1/members/devX"), { role: "terminal", terminalId: "t1", active: true, createdAtMs: NOW, updatedAtMs: NOW }));
+    await assertSucceeds(applyPlan(db("adminA"), revokeTerminalPlan(adminCtx("adminA"), { id: "t1", authUid: "dev1", name: "Counter" }, "lost")));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/terminals/t1"), { status: "active", updatedAtMs: NOW }));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/members/dev1"), { active: true, updatedAtMs: NOW }));
+    await assertSucceeds(updateDoc(doc(db("super"), "clients/c1/terminals/t1"), { status: "active", updatedAtMs: NOW }));
   });
 });
 
@@ -188,13 +206,13 @@ describe("terminal sales: exactly-once and invoice integrity", () => {
     const p = quick("q1", 1);
     await assertSucceeds(applyPlan(db("dev1"), p));
     const stats = await getDoc(doc(db("super"), `clients/c1/dailyStats/${BD}`));
-    expect(stats.data()?.totalPaise).toBe(21000);
+    expect(stats.data()?.totalPaise).toBe(20000); // ₹200 menu price, GST inside it
     expect(stats.data()?.orders).toBe(1);
     const stock = await getDoc(doc(db("super"), "clients/c1/stock/paneer"));
     expect(stock.data()?.onHand).toBe(9);
     await assertFails(applyPlan(db("dev1"), p));
     const again = await getDoc(doc(db("super"), `clients/c1/dailyStats/${BD}`));
-    expect(again.data()?.totalPaise).toBe(21000);
+    expect(again.data()?.totalPaise).toBe(20000);
   });
 
   it("stats cannot be incremented without a new posting", async () => {
