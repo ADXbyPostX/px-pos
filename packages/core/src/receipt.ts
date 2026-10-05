@@ -120,8 +120,10 @@ export interface ReceiptSettings {
   header: string[];
   footer: string[];
   showSac: boolean;
-  /** Printed above the outlet's name on bills (never on KOTs or the Z report). */
+  /** Printed in place of the outlet's name at the top of bills (never on KOTs or the Z report). */
   logo?: ReceiptLogo;
+  /** Switch the logo off without deleting it. Missing = on. */
+  showLogo?: boolean;
 }
 
 export const RESTAURANT_SAC = "996331";
@@ -132,8 +134,9 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   const { cols } = opts;
   const out: ReceiptLine[] = [];
   const s = inv.supplier;
-  if (settings.logo && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo });
-  out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
+  // The logo replaces the name (Mandy, 2026-10-05); address, GSTIN and FSSAI still follow.
+  if (settings.logo && settings.showLogo !== false && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo });
+  else out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
   for (const l of wrap(s.address, cols)) out.push(center(l));
   if (s.phone) out.push(center(`Ph: ${s.phone}`));
   if (s.gstin) out.push(center(`GSTIN: ${s.gstin}`));

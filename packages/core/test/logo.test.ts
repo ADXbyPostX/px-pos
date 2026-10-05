@@ -51,19 +51,28 @@ describe("receipt logo", () => {
     bill,
   };
 
-  it("prints first on bills, never in text or on KOTs", () => {
+  it("replaces the name at the top of bills; never in text or on KOTs", () => {
     const logo = logoOf(256, 64);
+    const plain = renderInvoice(print, { header: [], footer: [], showSac: false }, { copy: "ORIGINAL", cols: 32 });
     const lines = renderInvoice(print, { header: [], footer: [], showSac: false, logo }, { copy: "ORIGINAL", cols: 32 });
     expect(lines[0]).toEqual({ kind: "image", logo });
     expect(lines.filter((l) => l.kind === "image")).toHaveLength(1);
-    expect(receiptText(lines, 32)).toBe(receiptText(renderInvoice(print, { header: [], footer: [], showSac: false }, { copy: "ORIGINAL", cols: 32 }), 32));
+    expect(lines.slice(1)).toEqual(plain.slice(1)); // the name goes; address and the rest stay
+    expect(plain[0]).toMatchObject({ kind: "text", text: "Tea Room" });
+    expect(receiptText(lines, 32)).not.toContain("Tea Room");
     const kot = renderKot({ kotNo: "1-0001", kind: "new", mode: "quick", where: "Token 1", station: "beverage", items: [{ lineId: "a", name: "Tea", qty: 1 }], atMs: 0 } as never, { cols: 32 });
     expect(kot.some((l) => l.kind === "image")).toBe(false);
   });
 
-  it("a damaged logo is skipped, the bill still prints", () => {
+  it("switched off, the name prints like before", () => {
+    const lines = renderInvoice(print, { header: [], footer: [], showSac: false, logo: logoOf(256, 64), showLogo: false }, { copy: "ORIGINAL", cols: 32 });
+    expect(lines).toEqual(renderInvoice(print, { header: [], footer: [], showSac: false }, { copy: "ORIGINAL", cols: 32 }));
+  });
+
+  it("a damaged logo is skipped and the name prints instead", () => {
     const lines = renderInvoice(print, { header: [], footer: [], showSac: false, logo: { w: 64, h: 10, data: "AAAA" } }, { copy: "ORIGINAL", cols: 32 });
     expect(lines.some((l) => l.kind === "image")).toBe(false);
+    expect(lines[0]).toMatchObject({ kind: "text", text: "Tea Room" });
   });
 
   it("settings audit keeps the logo's size, not its pixels", () => {

@@ -149,7 +149,7 @@ export interface Client extends Meta {
   invoicePrefix: string;
   discountCapBps: Record<StaffRole, Bps>;
   approvals: Approvals;
-  receipt: { header: string[]; footer: string[]; showSac: boolean; logo?: ReceiptLogo };
+  receipt: { header: string[]; footer: string[]; showSac: boolean; logo?: ReceiptLogo; /** Missing = on. */ showLogo?: boolean };
   kds: { warnMin: number; lateMin: number };
   stockAutoOff: boolean;
   lastZNo: number;

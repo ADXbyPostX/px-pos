@@ -40,10 +40,13 @@ import { ReceiptLogoField } from "./receipt-logo-field";
 
 type Draft = Client;
 
-/** The receipt settings with this logo, or without one (the key removed, not left undefined). */
+/**
+ * The receipt settings with this logo (switched on), or without one. Keys are removed, never
+ * left undefined: Firestore rejects undefined.
+ */
 function withLogo(r: Client["receipt"], logo: Client["receipt"]["logo"]): Client["receipt"] {
   const { header, footer, showSac } = r;
-  return logo ? { header, footer, showSac, logo } : { header, footer, showSac };
+  return logo ? { header, footer, showSac, logo, showLogo: true } : { header, footer, showSac };
 }
 
 const APPROVALS: Array<{ key: ApprovalKey; label: string }> = [
@@ -306,9 +309,10 @@ export function SettingsView() {
           bodyClassName="grid grid-cols-1 gap-4 p-4 md:grid-cols-[minmax(0,1fr)_auto]"
         >
           <div className="flex flex-col gap-4">
-            <Field label="Logo (top of the bill)">
+            <Field label="Logo">
               <ReceiptLogoField value={d.receipt.logo} onChange={(logo) => set("receipt", withLogo(d.receipt, logo))} />
             </Field>
+            {d.receipt.logo ? <SwitchRow label="Print the logo instead of the outlet name" checked={d.receipt.showLogo !== false} onCheckedChange={(v) => set("receipt", { ...d.receipt, showLogo: v })} /> : null}
             <Field label="Header lines (one per line)" htmlFor="st-header">
               <Textarea id="st-header" value={d.receipt.header.join("\n")} onChange={(e) => set("receipt", { ...d.receipt, header: e.target.value.split("\n").slice(0, 4) })} rows={3} />
             </Field>
@@ -318,7 +322,7 @@ export function SettingsView() {
             <SwitchRow label="Print SAC code 996331" checked={d.receipt.showSac} onCheckedChange={(v) => set("receipt", { ...d.receipt, showSac: v })} />
           </div>
           <div aria-label="Receipt preview" className="max-h-[32rem] overflow-auto rounded-lg border bg-white px-3 py-3 font-mono text-[11px] leading-snug text-black">
-            {logoUrl && d.receipt.logo ? (
+            {logoUrl && d.receipt.logo && d.receipt.showLogo !== false ? (
               // 12 printer dots per character column (384 dots = 32 columns on 58 mm), so it's to scale.
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logoUrl} alt="Receipt logo" className="mx-auto block [image-rendering:pixelated]" style={{ width: `${d.receipt.logo.w / 12}ch` }} />
