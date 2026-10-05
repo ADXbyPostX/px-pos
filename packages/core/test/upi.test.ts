@@ -14,8 +14,8 @@ describe("UPI", () => {
   });
 
   it("builds a pay link with the amount locked", () => {
-    expect(upiPayUri({ vpa: "tearoom@okicici", payee: "Tea Room" }, 12500)).toBe("upi://pay?pa=tearoom%40okicici&pn=Tea%20Room&am=125&cu=INR");
-    expect(upiPayUri({ vpa: " tearoom@okicici ", payee: "Tea Room" }, 12550, { note: "Token 7" })).toBe("upi://pay?pa=tearoom%40okicici&pn=Tea%20Room&am=125.50&cu=INR&tn=Token%207");
+    expect(upiPayUri({ vpa: "tearoom@okicici", payee: "Tea Room" }, 12500)).toBe("upi://pay?pa=tearoom@okicici&pn=Tea%20Room&am=125&cu=INR");
+    expect(upiPayUri({ vpa: " tearoom@okicici ", payee: "Tea Room" }, 12550, { note: "Token 7" })).toBe("upi://pay?pa=tearoom@okicici&pn=Tea%20Room&am=125.50&cu=INR&tn=Token%207");
     expect(upiPayUri({ vpa: "a@b", payee: "Tea Room" }, 5)).toContain("am=0.05");
     // Short enough for a version-3 QR (53 bytes) on the customer display.
     const compact = upiPayUri({ vpa: "tearoom@okicici", payee: "Tea Room, Kodambakkam" }, 12500, { compact: true, note: "x" });

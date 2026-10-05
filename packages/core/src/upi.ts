@@ -28,7 +28,9 @@ function rupees(p: Paise): string {
 export function upiPayUri(a: UpiAccount, amountPaise: Paise, opts: { note?: string; compact?: boolean } = {}): string {
   const payee = a.payee.trim().slice(0, 25);
   const q = [
-    `pa=${opts.compact ? a.vpa.trim() : encodeURIComponent(a.vpa.trim())}`,
+    // The UPI ID goes in as typed: validateVpa allows only URL-safe characters, and some bank UPI
+    // apps reject an escaped "@" (%40) as an invalid ID. The payee name is escaped (spaces, commas).
+    `pa=${a.vpa.trim()}`,
     // Compact keeps the name before any comma ("Tea Room, Kodambakkam" → "TeaRoom").
     `pn=${opts.compact ? (payee.split(",")[0] ?? payee).replace(/[^A-Za-z0-9]/g, "").slice(0, 12) : encodeURIComponent(payee)}`,
     `am=${rupees(amountPaise)}`,
