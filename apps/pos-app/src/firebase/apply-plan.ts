@@ -1,4 +1,4 @@
-import { arrayUnion, deleteField, doc, increment, serverTimestamp, writeBatch } from "@react-native-firebase/firestore";
+import { arrayUnion, deleteField, doc, increment, serverTimestamp, writeBatch, type Transaction } from "@react-native-firebase/firestore";
 import { mapSentinels, type Sentinel, type WritePlan } from "@px-pos/core";
 import { getDb } from "./index";
 
@@ -28,4 +28,16 @@ export function applyPlan(plan: WritePlan): Promise<void> {
     else batch.update(ref, data);
   }
   return batch.commit();
+}
+
+/** A plan's ops inside a transaction (day close: online only, reads first). */
+export function applyPlanInTx(tx: Transaction, plan: WritePlan): void {
+  const db = getDb();
+  for (const op of plan.ops) {
+    const ref = doc(db, op.path);
+    const data = toFirestore(op.data);
+    if (op.op === "set") tx.set(ref, data);
+    else if (op.op === "merge") tx.set(ref, data, { merge: true });
+    else tx.update(ref, data);
+  }
 }

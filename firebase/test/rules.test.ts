@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   billPlan,
   bootstrapPlan,
+  closeDayPlan,
   computeBill,
   createClientPlan,
   dayOpenPlan,
@@ -290,6 +291,26 @@ describe("day close", () => {
     await assertSucceeds(updateDoc(doc(db("super"), `clients/c1/days/${BD}`), { status: "open" }));
     // lastZNo can only step by one.
     await assertFails(updateDoc(doc(db("dev1"), "clients/c1"), { lastZNo: 5 }));
+  });
+});
+
+describe("end of day (closeDayPlan)", () => {
+  const drawerDoc = { id: `${BD}_t1`, terminalId: "t1", businessDate: BD, openingFloatPaise: 200000, openedBy: "staff1", openedAtMs: NOW, status: "open" as const, updatedAtMs: NOW };
+  const input = (counts: Record<string, { countedPaise?: number }>) => ({ businessDate: BD, lastZNo: 0, day: { status: "open" as const }, stats: null, drawers: [drawerDoc], invoices: [], prevSnapshot: null, counts });
+
+  it("the till closes its drawer and the day in one batch; it can't close it twice", async () => {
+    await assertSucceeds(applyPlan(db("dev1"), dayOpenPlan(termCtx(), { businessDate: BD, floatPaise: 200000, createDay: true })));
+    const { plan } = closeDayPlan(termCtx(), input({ t1: { countedPaise: 200000 } }));
+    await assertSucceeds(applyPlan(db("dev1"), plan));
+    await assertFails(applyPlan(db("dev1"), closeDayPlan(termCtx(), { ...input({ t1: { countedPaise: 200000 } }), lastZNo: 1 }).plan));
+  });
+
+  it("the outlet's admin can close it from admin without a count; another client's admin can't", async () => {
+    await assertSucceeds(applyPlan(db("dev1"), dayOpenPlan(termCtx(), { businessDate: BD, floatPaise: 200000, createDay: true })));
+    await assertFails(applyPlan(db("adminB"), closeDayPlan(adminCtx("adminB"), input({})).plan));
+    await assertSucceeds(applyPlan(db("adminA"), closeDayPlan(adminCtx("adminA"), input({})).plan));
+    const day = await getDoc(doc(db("adminA"), `clients/c1/days/${BD}`));
+    expect(day.data()).toMatchObject({ status: "closed", zNo: 1 });
   });
 });
 

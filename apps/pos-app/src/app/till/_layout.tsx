@@ -10,6 +10,7 @@ import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { LockScreen } from "@/components/pos/lock-screen";
 import { NavRail } from "@/components/pos/nav-rail";
 import { OpenDay } from "@/components/pos/open-day";
+import { StaleDayBanner } from "@/components/pos/stale-day-banner";
 import { useCheckoutFocus } from "@/state/checkout-focus";
 import { DataProvider, useData } from "@/state/data";
 import { OperatorProvider, useOperator } from "@/state/operator";
@@ -41,6 +42,7 @@ function TillGate() {
           </Text>
           <SyncPill />
         </View>
+        <StaleDayBanner />
         <View className="flex-1">
           <Slot />
         </View>
@@ -52,7 +54,10 @@ function TillGate() {
     <View className="flex-1 flex-row bg-background" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }} onTouchStart={touch}>
       <NavRail />
       <View className="flex-1">
-        <Slot />
+        <StaleDayBanner />
+        <View className="flex-1">
+          <Slot />
+        </View>
       </View>
     </View>
   );

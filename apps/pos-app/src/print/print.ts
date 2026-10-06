@@ -1,4 +1,4 @@
-import { printsKots, renderInvoice, renderKot, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal } from "@px-pos/core";
+import { printsKots, renderInvoice, renderKot, renderZ, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal, type ZReport } from "@px-pos/core";
 import { btPrinterPref } from "@/local/prefs";
 import { encodeReceipt } from "./encode";
 import { bluetoothPrinter, builtInPrinter, lanPrinter, type PrinterTransport } from "./transport";
@@ -48,6 +48,18 @@ export async function printKots(terminal: Terminal, client: Pick<Client, "kitche
   if (!r || kots.length === 0) return null;
   try {
     for (const k of kots) await r.transport.send(encodeReceipt(renderKot(k, { cols: r.cols }), r.cols));
+    return null;
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
+/** The Z report at day close (receipt printer). */
+export async function printZ(terminal: Terminal, outletName: string, z: ZReport, terminalNames: Record<string, string>): Promise<string | null> {
+  const r = route(terminal.printers?.receipt);
+  if (!r) return null;
+  try {
+    await r.transport.send(encodeReceipt(renderZ(z, { cols: r.cols, outletName, terminalNames }), r.cols));
     return null;
   } catch (e) {
     return (e as Error).message;

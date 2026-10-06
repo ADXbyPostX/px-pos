@@ -1,6 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { bizDateLabel, cashStats, collected, expectedCashFor, formatINR, MODE_LABEL, netSales, np, VOID_REASONS, type OrderMode } from "@px-pos/core";
+import { EndOfDay } from "@/components/pos/end-of-day";
+import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { cn } from "@/lib/utils";
@@ -41,8 +44,13 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** Today (X report, live) and this terminal's drawer. Z close arrives with day close (M6). */
+/** Today (X report, live) and this terminal's drawer; End of day counts the cash and closes it (Z). */
 export default function Day() {
+  // ?close=1 comes from the "still open" banner: straight to End of day.
+  const params = useLocalSearchParams<{ close?: string }>();
+  const router = useRouter();
+  const [closingState, setClosing] = useState(false);
+  const closing = closingState || params.close === "1";
   const { tid } = usePaired();
   const { bizDate, day, drawer, stats, openOrders } = useData();
   const { operator } = useOperator();
@@ -59,11 +67,25 @@ export default function Day() {
   const modes = Object.entries(s?.byMode ?? {}).map(([k, v]) => [k, np(v)] as const);
   const pays = Object.entries(s?.byPay ?? {});
 
+  if (closing && day?.status !== "closed") return <EndOfDay
+        onCancel={() => {
+          setClosing(false);
+          router.setParams({ close: "" });
+        }}
+      />;
+
   return (
     <ScrollView contentContainerClassName="gap-3 p-3">
-      <View className="flex-row flex-wrap items-baseline justify-between gap-2 px-1">
-        <Text className="text-xl font-bold">{bizDate ? bizDateLabel(bizDate, true) : "Today"}</Text>
-        <Text className={cn("text-sm font-semibold", day?.status === "closed" ? "text-warning" : "text-success")}>{day?.status === "closed" ? `Closed · Z ${day.zNo ?? ""}` : "Open"}</Text>
+      <View className="flex-row flex-wrap items-center justify-between gap-2 px-1">
+        <View className="flex-row items-baseline gap-3">
+          <Text className="text-xl font-bold">{bizDate ? bizDateLabel(bizDate, true) : "Today"}</Text>
+          <Text className={cn("text-sm font-semibold", day?.status === "closed" ? "text-warning" : "text-success")}>{day?.status === "closed" ? `Closed · Z ${day.zNo ?? ""}` : "Open"}</Text>
+        </View>
+        {day?.status !== "closed" ? (
+          <Button variant="destructive" onPress={() => setClosing(true)} accessibilityLabel="End of day">
+            <Text>End of day</Text>
+          </Button>
+        ) : null}
       </View>
       <View className="flex-row flex-wrap gap-2">
         <Stat label="Orders" value={String(s?.orders ?? 0)} />

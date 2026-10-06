@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { bizDateLabel, can, dayOpenPlan, formatINR, parseINR, paths, type Day } from "@px-pos/core";
+import { addDays, bizDateLabel, can, dayOpenPlan, formatINR, parseINR, paths, type Day } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { planCtx } from "@/actions/context";
@@ -14,12 +14,17 @@ import { useOperator } from "@/state/operator";
 import { usePaired } from "@/state/session";
 import { applyKey, Keypad } from "./keypad";
 
-/** Start of the business day on this terminal: count the opening float into the drawer. */
+/**
+ * Start of the business day on this terminal: count the opening float into the drawer. When the
+ * calendar's business day is already closed (End of day ran this evening), the next one opens.
+ */
 export function OpenDay() {
   const session = usePaired();
   const { suggestedBizDate, setBizDate } = useData();
+  const base = useLiveDoc<Day>(paths.day(session.cid, suggestedBizDate));
+  const target = base.data?.status === "closed" ? addDays(suggestedBizDate, 1) : suggestedBizDate;
   const { operator, lock } = useOperator();
-  const day = useLiveDoc<Day>(paths.day(session.cid, suggestedBizDate));
+  const day = useLiveDoc<Day>(paths.day(session.cid, target));
   const [amount, setAmount] = useState("2000");
   const float = parseINR(amount) ?? 0;
   const closed = day.data?.status === "closed";
@@ -30,12 +35,12 @@ export function OpenDay() {
 
   function open() {
     if (!operator) return;
-    const { row } = allocateAndJournal(`dayopen:${suggestedBizDate}:${session.tid}`, [], () => ({
-      plan: dayOpenPlan(planCtx(session, operator), { businessDate: suggestedBizDate, floatPaise: float, createDay: !day.data }),
+    const { row } = allocateAndJournal(`dayopen:${target}:${session.tid}`, [], () => ({
+      plan: dayOpenPlan(planCtx(session, operator), { businessDate: target, floatPaise: float, createDay: !day.data }),
       result: null,
     }));
     submit(row);
-    setBizDate(suggestedBizDate);
+    setBizDate(target);
   }
 
   return (
@@ -43,7 +48,12 @@ export function OpenDay() {
       <View className={phone ? "gap-3 px-6 pt-8" : "flex-1 justify-center gap-4 px-12"}>
         <Text className="text-sm text-muted-foreground">{session.client.name}</Text>
         <Text className={phone ? "text-3xl font-bold" : "text-4xl font-bold"}>Open the day</Text>
-        <Text className="text-xl text-muted-foreground">Business day {bizDateLabel(suggestedBizDate, true)}</Text>
+        <Text className="text-xl text-muted-foreground">Business day {bizDateLabel(target, true)}</Text>
+        {base.data?.status === "closed" ? (
+          <Text className="text-lg text-success">
+            {bizDateLabel(suggestedBizDate)} is closed{base.data.zNo ? ` (Z ${base.data.zNo})` : ""}.
+          </Text>
+        ) : null}
         {closed ? <Text className="text-lg text-primary">This business day was already closed. Ask a manager to reopen it in PX POS Admin.</Text> : null}
         {!allowed ? <Text className="text-lg text-warning">A cashier or manager has to open the day.</Text> : null}
         <View className={phone ? "mt-2 flex-row gap-3" : "mt-6 flex-row gap-3"}>

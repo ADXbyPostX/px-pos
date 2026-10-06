@@ -1,6 +1,7 @@
 import { paths, postingKey } from "../paths";
-import { cashMoveDelta, expenseDelta, expenseVoidDelta, stockMoveDelta } from "../stats";
-import type { BizDate, CashMoveKind, Expense, ExpenseCategory, Paise, PaidVia, PostingKind, ZReport } from "../types";
+import { cashMoveDelta, cashStats, expectedCashFor, expenseDelta, expenseVoidDelta, stockMoveDelta, zReport } from "../stats";
+import { snapshotFromLedger } from "../stock";
+import type { BizDate, CashMoveKind, DailyStats, Day, Drawer, Expense, ExpenseCategory, Invoice, Paise, PaidVia, PostingKind, ZReport } from "../types";
 import { auditOp, meta, postingOps } from "./common";
 import type { PlanCtx, PlanOp, WritePlan } from "./types";
 
@@ -233,6 +234,86 @@ export function zClosePlan(
     ],
     primaryPath: path,
   };
+}
+
+/** Bills issued on a business day, per series: first and last number, issued and cancelled. */
+export function invoiceRangesFrom(invoices: Array<Pick<Invoice, "series" | "seq" | "invoiceNo" | "status">>): ZReport["invoiceRanges"] {
+  const by = new Map<string, Array<Pick<Invoice, "seq" | "invoiceNo" | "status">>>();
+  for (const i of invoices) if (i.status !== "void_unused") by.set(i.series, [...(by.get(i.series) ?? []), i]);
+  return [...by.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([series, list]) => {
+      const sorted = [...list].sort((a, b) => a.seq - b.seq);
+      return { series, first: sorted[0]!.invoiceNo, last: sorted[sorted.length - 1]!.invoiceNo, count: sorted.length, cancelled: sorted.filter((i) => i.status === "cancelled").length };
+    });
+}
+
+/** What a day close reads first (inside the transaction, from the server). */
+export interface CloseDayInput {
+  businessDate: BizDate;
+  /** clients/{cid}.lastZNo — the new Z is the next number. */
+  lastZNo: number;
+  day: Pick<Day, "status" | "zNo"> | null;
+  stats: Partial<DailyStats> | null;
+  /** Every drawer opened for the day (one per terminal). */
+  drawers: Array<Drawer & { id: string }>;
+  /** That day's bills, for the invoice ranges on the Z. */
+  invoices: Array<Pick<Invoice, "series" | "seq" | "invoiceNo" | "status">>;
+  /** The previous business day's stock snapshot, if it was closed. */
+  prevSnapshot: Record<string, number> | null;
+  /** Cash counted per terminal for drawers still open. A drawer without a count closes as "not counted" (admin). */
+  counts: Record<string, { countedPaise?: Paise; note?: string }>;
+  approver?: { id: string; name?: string };
+}
+
+/**
+ * End of day, from the till or from admin: closes every drawer still open (counted, or marked not
+ * counted), then the day itself with the next Z number, the Z report and the stock snapshot.
+ * Run it inside a transaction with fresh reads (online only); a day already closed throws.
+ */
+export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan; z: ZReport; zNo: number } {
+  if (!i.day) throw new Error(`Business day ${i.businessDate} was never opened.`);
+  if (i.day.status === "closed") throw new Error(`Business day ${i.businessDate} is already closed (Z ${i.day.zNo ?? ""}).`);
+  const zNo = (i.lastZNo || 0) + 1;
+  const stats = i.stats ?? {};
+  const ops: PlanOp[] = [];
+  const counted: Record<string, Paise | undefined> = {};
+  for (const d of i.drawers) {
+    if (d.status === "closed") {
+      counted[d.terminalId] = d.countedPaise;
+      continue;
+    }
+    const expected = expectedCashFor(d.openingFloatPaise, cashStats(stats.cash?.[d.terminalId]));
+    const c = i.counts[d.terminalId];
+    const has = c?.countedPaise != null;
+    counted[d.terminalId] = has ? c.countedPaise : undefined;
+    const note = c?.note?.trim() || (has ? undefined : "Closed without a cash count");
+    const path = paths.drawer(ctx.cid, i.businessDate, d.terminalId);
+    ops.push({
+      path,
+      op: "update",
+      data: {
+        status: "closed",
+        expectedPaise: expected,
+        ...(has ? { countedPaise: c.countedPaise, variancePaise: c.countedPaise! - expected, denoms: {} } : {}),
+        ...(note ? { note } : {}),
+        closedBy: ctx.actorId,
+        closedAtMs: ctx.nowMs,
+        updatedAtMs: ctx.nowMs,
+      },
+    });
+    ops.push(auditOp(ctx, { action: "drawer.close", target: { type: "drawer", id: `${i.businessDate}_${d.terminalId}` }, after: { expected, ...(has ? { counted: c.countedPaise, variance: c.countedPaise! - expected } : { counted: null }) }, ...(note ? { reason: note } : {}) }));
+  }
+  const z = zReport({
+    zNo,
+    businessDate: i.businessDate,
+    closedAtMs: ctx.nowMs,
+    stats,
+    drawers: i.drawers.map((d) => ({ terminalId: d.terminalId, openingFloatPaise: d.openingFloatPaise, ...(counted[d.terminalId] != null ? { countedPaise: counted[d.terminalId] } : {}) })),
+    invoiceRanges: invoiceRangesFrom(i.invoices),
+  });
+  const zPlan = zClosePlan(ctx, { businessDate: i.businessDate, zNo, z, snapshot: snapshotFromLedger(i.prevSnapshot ?? {}, stats.stock), ...(i.approver ? { approver: i.approver } : {}) });
+  return { plan: { label: `Close day ${i.businessDate}`, ops: [...ops, ...zPlan.ops], primaryPath: zPlan.primaryPath }, z, zNo };
 }
 
 export function dayCarryForwardPlan(ctx: PlanCtx, businessDate: BizDate, approver?: { id: string; name?: string }): WritePlan {
