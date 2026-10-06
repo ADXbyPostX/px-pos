@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { collection, query, where } from "firebase/firestore";
-import { ArrowRight, Building2, Pencil, Plus } from "lucide-react";
+import { ArrowRight, Building2, Copy, Pencil, Plus } from "lucide-react";
 import { assignAdminsPlan, MODE_LABEL, ORDER_MODES, paths, updateClientPlan, type Client, type PlatformUser } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,6 +26,7 @@ import { useCollection, type WithId } from "@/lib/firebase/hooks";
 import { fmtDate } from "@/lib/format";
 import { useRunPlan } from "@/lib/run-plan";
 import { ClientFormDialog } from "./client-form-dialog";
+import { DuplicateClientDialog } from "./duplicate-client-dialog";
 
 type Row = WithId<Client>;
 const TAX_LABEL = { regular: "Regular GST", composition: "Composition", unregistered: "Not registered" } as const;
@@ -43,6 +44,7 @@ export function ClientsView() {
   const [draftAdmins, setDraftAdmins] = useState<string[] | null>(null);
   const [confirmSuspend, setConfirmSuspend] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const { run, pending } = useRunPlan();
   const creating = params.get("new") === "1";
 
@@ -167,6 +169,12 @@ export function ClientsView() {
                   {selected.status === "active" ? "Suspend" : "Reactivate"}
                 </Button>
               ) : null}
+              {isSuper ? (
+                <Button variant="outline" onClick={() => setDuplicating(true)}>
+                  <Copy data-icon="inline-start" aria-hidden />
+                  Duplicate
+                </Button>
+              ) : null}
               <Button variant="outline" onClick={() => setEditing(true)}>
                 <Pencil data-icon="inline-start" aria-hidden />
                 Edit
@@ -266,6 +274,7 @@ export function ClientsView() {
       ) : null}
 
       {isSuper ? <ClientFormDialog open={creating} onOpenChange={setCreating} /> : null}
+      {isSuper ? <DuplicateClientDialog source={selected ? { id: selected.id, name: selected.name } : null} open={duplicating && Boolean(selected)} onOpenChange={setDuplicating} /> : null}
       <ClientFormDialog open={editing && Boolean(selected)} onOpenChange={setEditing} client={selected} />
     </>
   );

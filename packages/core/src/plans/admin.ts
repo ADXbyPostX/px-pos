@@ -2,7 +2,7 @@ import type { PhotoInput } from "../menu-photos";
 import { paths, postingKey } from "../paths";
 import { adminStaffId } from "../pin";
 import { stockMoveDelta } from "../stats";
-import type { BizDate, Category, Client, Floor, Item, PlatformRole, Staff, Table } from "../types";
+import type { BizDate, Category, Client, Floor, Item, ItemPhoto, Meta, PlatformRole, Staff, Table } from "../types";
 import { auditOp, changedKeys, meta, pick, postingOps } from "./common";
 import { del, inc } from "./types";
 import type { PlanCtx, PlanOp, WritePlan } from "./types";
@@ -305,3 +305,74 @@ export function memberPlan(ctx: PlanCtx, uid: string, role: "owner" | "staff", a
   return { label: `Member ${role}`, ops: [{ path, op: "merge", data: { role, active, updatedAtMs: ctx.nowMs, createdAtMs: ctx.nowMs } }], primaryPath: path };
 }
 
+
+/** Everything `duplicateClientPlans` copies, as read from the source client (doc id on each). */
+export interface ClientCopySource {
+  client: Client;
+  categories: Array<Category & { id: string }>;
+  items: Array<Item & { id: string }>;
+  photos: Array<ItemPhoto & { id: string }>;
+  floors: Array<Floor & { id: string }>;
+  tables: Array<Table & { id: string }>;
+}
+
+/** A batch stays far below Firestore's 500 writes and 10 MiB; photos are up to ~270 KB each. */
+const COPY_MAX_OPS = 400;
+const COPY_MAX_PHOTO_CHARS = 4_000_000;
+
+/**
+ * A new client set up like another: settings, receipt and logo, categories, items, photos,
+ * floors and tables, under the same doc ids (items keep pointing at their categories, photos at
+ * their items). Never copied: admins, staff, terminals, sales, stock, and what identifies the real
+ * outlet on bills and payments (GSTIN, FSSAI, phone, UPI ID). Returns several plans, applied in
+ * order: the client first (rules check it exists), then the menu, then photos in chunks.
+ */
+export function duplicateClientPlans(ctx: PlanCtx, src: ClientCopySource, name: string): WritePlan[] {
+  const fresh = <T extends object>(o: T) => {
+    const { id: _id, createdAt: _c, createdAtMs: _cm, updatedAtMs: _u, source: _s, schemaVersion: _v, ...rest } = o as T & Partial<Meta> & { id?: string };
+    return { ...rest, ...meta(ctx) } as Record<string, unknown>;
+  };
+  const { name: _n, legalName: _l, adminUids: _a, status: _st, gstin: _g, fssai: _f, phone: _p, upi: _up, lastZNo: _z, ...settings } = fresh(src.client) as unknown as Client & { priceMode?: unknown; requirePin?: unknown };
+  delete settings.priceMode;
+  delete settings.requirePin;
+  const client = { ...settings, name, legalName: name, fssai: "", adminUids: [] as string[], status: "active" as const, lastZNo: 0 };
+  const photos = src.photos.filter((p) => p.active !== false);
+  const plans: WritePlan[] = [
+    {
+      label: `Create client ${name}`,
+      ops: [
+        { path: paths.client(ctx.cid), op: "set", data: client },
+        auditOp(ctx, {
+          action: "client.duplicate",
+          target: { type: "client", id: ctx.cid, label: name },
+          after: { from: src.client.name, categories: src.categories.length, items: src.items.length, photos: photos.length, floors: src.floors.length, tables: src.tables.length },
+        }),
+      ],
+      primaryPath: paths.client(ctx.cid),
+    },
+  ];
+
+  const menu: PlanOp[] = [
+    ...src.categories.map((c) => ({ path: paths.doc(ctx.cid, "categories", c.id), op: "set" as const, data: fresh(c) })),
+    ...src.items.map((i) => ({ path: paths.doc(ctx.cid, "items", i.id), op: "set" as const, data: fresh(i) })),
+    ...src.floors.map((f) => ({ path: paths.doc(ctx.cid, "floors", f.id), op: "set" as const, data: fresh(f) })),
+    ...src.tables.map((t) => ({ path: paths.doc(ctx.cid, "tables", t.id), op: "set" as const, data: fresh(t) })),
+  ];
+  for (let i = 0; i < menu.length; i += COPY_MAX_OPS) plans.push({ label: `Copy menu to ${name}`, ops: menu.slice(i, i + COPY_MAX_OPS), primaryPath: menu[i]!.path });
+
+  let chunk: PlanOp[] = [];
+  let chars = 0;
+  const flush = () => {
+    if (chunk.length) plans.push({ label: `Copy photos to ${name}`, ops: chunk, primaryPath: chunk[0]!.path });
+    chunk = [];
+    chars = 0;
+  };
+  for (const p of photos) {
+    const size = p.data?.length ?? 0;
+    if (chunk.length && (chars + size > COPY_MAX_PHOTO_CHARS || chunk.length >= COPY_MAX_OPS)) flush();
+    chunk.push({ path: paths.itemPhoto(ctx.cid, p.id), op: "set", data: fresh(p) });
+    chars += size;
+  }
+  flush();
+  return plans;
+}
