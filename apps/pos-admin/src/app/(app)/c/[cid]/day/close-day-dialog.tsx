@@ -88,6 +88,8 @@ export function CloseDayDialog({ cid, businessDate, today, stats, terminals, onO
         ))}
         {drawers.status === "loading" ? (
           <p className="text-muted-foreground">Loading the drawers…</p>
+        ) : drawers.data.length === 0 ? (
+          <p className="text-muted-foreground">No drawer was recorded for this day, so it closes without a cash count.</p>
         ) : open.length === 0 ? (
           <p className="text-muted-foreground">Every drawer is already closed.</p>
         ) : (

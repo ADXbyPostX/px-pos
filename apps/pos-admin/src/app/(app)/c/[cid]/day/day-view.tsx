@@ -55,7 +55,11 @@ export function DayView() {
 
   const rows = useMemo<Row[]>(() => {
     const byDate = new Map(stats.data.map((s) => [s.id, s]));
-    return days.data.map((d) => ({ ...d, stats: byDate.get(d.id) }));
+    const listed = new Set(days.data.map((d) => d.id));
+    // Sales on a date whose day record is gone (test data wiped while a till kept that day open)
+    // still need a close: list them as open.
+    const orphans: Row[] = stats.data.filter((s) => !listed.has(s.id)).map((s) => ({ id: s.id, status: "open", openedAtMs: 0, openedBy: "", updatedAtMs: 0, stats: s }));
+    return [...days.data.map((d) => ({ ...d, stats: byDate.get(d.id) })), ...orphans];
   }, [days.data, stats.data]);
   const staffName = useMemo(() => {
     const m = new Map(staff.data.map((s) => [s.id, s.name]));

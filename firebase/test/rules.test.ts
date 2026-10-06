@@ -305,6 +305,14 @@ describe("end of day (closeDayPlan)", () => {
     await assertFails(applyPlan(db("dev1"), closeDayPlan(termCtx(), { ...input({ t1: { countedPaise: 200000 } }), lastZNo: 1 }).plan));
   });
 
+  it("a day whose day and drawer records were wiped still closes, from the till and from admin", async () => {
+    await assertSucceeds(applyPlan(db("dev1"), closeDayPlan(termCtx(), { ...input({ t1: { countedPaise: 5000 } }), day: null, drawers: [] }).plan));
+    const day = await getDoc(doc(db("dev1"), `clients/c1/days/${BD}`));
+    expect(day.data()).toMatchObject({ status: "closed", zNo: 1 });
+    const other = "2026-09-30";
+    await assertSucceeds(applyPlan(db("adminA"), closeDayPlan(adminCtx("adminA"), { ...input({}), businessDate: other, lastZNo: 1, day: null, drawers: [], stats: { cash: { t1: { sales: 100, refunds: 0, paidIn: 0, paidOut: 0, drops: 0 } } } }).plan));
+  });
+
   it("the outlet's admin can close it from admin without a count; another client's admin can't", async () => {
     await assertSucceeds(applyPlan(db("dev1"), dayOpenPlan(termCtx(), { businessDate: BD, floatPaise: 200000, createDay: true })));
     await assertFails(applyPlan(db("adminB"), closeDayPlan(adminCtx("adminB"), input({})).plan));

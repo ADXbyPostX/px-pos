@@ -47,9 +47,18 @@ describe("close day", () => {
     expect(z.drawers.find((d) => d.terminalId === "t2")).toMatchObject({ countedPaise: 100000 });
   });
 
-  it("refuses a day that is closed or was never opened", () => {
+  it("refuses a day that is already closed", () => {
     expect(() => closeDayPlan(till, { ...base, day: { status: "closed", zNo: 3 } })).toThrow(/already closed \(Z 3\)/);
-    expect(() => closeDayPlan(till, { ...base, day: null })).toThrow(/never opened/);
+  });
+
+  it("closes a day whose day and drawer records were wiped while the till kept selling on it", () => {
+    const { plan, z } = closeDayPlan(till, { ...base, day: null, drawers: [] });
+    const day = plan.ops.find((o) => o.path === "clients/tr/days/2026-10-05");
+    expect(day?.data).toMatchObject({ status: "closed", zNo: 4, openedAtMs: Date.parse("2026-10-05T00:00:00+05:30"), openedBy: "s1" });
+    // The drawer comes back with no float: expected = 300 cash − 50 paid out = 250; counted 2240.
+    const drawerOp = plan.ops.find((o) => o.path === "clients/tr/drawers/2026-10-05_t1");
+    expect(drawerOp).toMatchObject({ op: "merge", data: { terminalId: "t1", businessDate: "2026-10-05", openingFloatPaise: 0, status: "closed", expectedPaise: 25000, countedPaise: 224000 } });
+    expect(z.drawers).toEqual([expect.objectContaining({ terminalId: "t1", floatPaise: 0, expectedPaise: 25000, countedPaise: 224000 })]);
   });
 
   it("invoice ranges per series", () => {

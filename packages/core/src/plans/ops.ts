@@ -209,7 +209,16 @@ export function drawerClosePlan(
  */
 export function zClosePlan(
   ctx: PlanCtx,
-  i: { businessDate: BizDate; zNo: number; z: ZReport; snapshot: Record<string, number>; counted?: Record<string, number>; approver?: { id: string; name?: string } },
+  i: {
+    businessDate: BizDate;
+    zNo: number;
+    z: ZReport;
+    snapshot: Record<string, number>;
+    counted?: Record<string, number>;
+    approver?: { id: string; name?: string };
+    /** The day's record was missing (e.g. wiped with test data): write when and by whom it counts as opened. */
+    opened?: { atMs: number; by: string };
+  },
 ): WritePlan {
   const path = paths.day(ctx.cid, i.businessDate);
   return {
@@ -220,6 +229,7 @@ export function zClosePlan(
         op: "merge",
         data: {
           status: "closed",
+          ...(i.opened ? { openedAtMs: i.opened.atMs, openedBy: i.opened.by } : {}),
           closedAtMs: ctx.nowMs,
           closedBy: ctx.actorId,
           ...(i.approver ? { approvedBy: i.approver.id } : {}),
@@ -248,7 +258,7 @@ export function invoiceRangesFrom(invoices: Array<Pick<Invoice, "series" | "seq"
     });
 }
 
-/** What a day close reads first (inside the transaction, from the server). */
+/** What a day close reads first (inside the transaction, from the server). `day` null = its record is missing. */
 export interface CloseDayInput {
   businessDate: BizDate;
   /** clients/{cid}.lastZNo — the new Z is the next number. */
@@ -272,13 +282,20 @@ export interface CloseDayInput {
  * Run it inside a transaction with fresh reads (online only); a day already closed throws.
  */
 export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan; z: ZReport; zNo: number } {
-  if (!i.day) throw new Error(`Business day ${i.businessDate} was never opened.`);
-  if (i.day.status === "closed") throw new Error(`Business day ${i.businessDate} is already closed (Z ${i.day.zNo ?? ""}).`);
+  if (i.day?.status === "closed") throw new Error(`Business day ${i.businessDate} is already closed (Z ${i.day.zNo ?? ""}).`);
   const zNo = (i.lastZNo || 0) + 1;
   const stats = i.stats ?? {};
   const ops: PlanOp[] = [];
   const counted: Record<string, Paise | undefined> = {};
-  for (const d of i.drawers) {
+  // A till that sold (or is counting) on a day whose drawer record is gone — test data was wiped
+  // while the till kept the day open — still closes: its drawer is recreated with no float.
+  const known = new Set(i.drawers.map((d) => d.terminalId));
+  const lost = [...new Set([...Object.keys(i.counts), ...Object.keys(stats.cash ?? {})])].filter((t) => !known.has(t));
+  const drawers: Array<Drawer & { id: string; lost?: boolean }> = [
+    ...i.drawers,
+    ...lost.map((terminalId) => ({ id: `${i.businessDate}_${terminalId}`, terminalId, businessDate: i.businessDate, openingFloatPaise: 0, openedBy: ctx.actorId, openedAtMs: ctx.nowMs, status: "open" as const, updatedAtMs: ctx.nowMs, lost: true })),
+  ];
+  for (const d of drawers) {
     if (d.status === "closed") {
       counted[d.terminalId] = d.countedPaise;
       continue;
@@ -291,8 +308,9 @@ export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan;
     const path = paths.drawer(ctx.cid, i.businessDate, d.terminalId);
     ops.push({
       path,
-      op: "update",
+      op: d.lost ? "merge" : "update",
       data: {
+        ...(d.lost ? { terminalId: d.terminalId, businessDate: i.businessDate, openingFloatPaise: 0, openedBy: ctx.actorId, openedAtMs: ctx.nowMs } : {}),
         status: "closed",
         expectedPaise: expected,
         ...(has ? { countedPaise: c.countedPaise, variancePaise: c.countedPaise! - expected, denoms: {} } : {}),
@@ -309,10 +327,18 @@ export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan;
     businessDate: i.businessDate,
     closedAtMs: ctx.nowMs,
     stats,
-    drawers: i.drawers.map((d) => ({ terminalId: d.terminalId, openingFloatPaise: d.openingFloatPaise, ...(counted[d.terminalId] != null ? { countedPaise: counted[d.terminalId] } : {}) })),
+    drawers: drawers.map((d) => ({ terminalId: d.terminalId, openingFloatPaise: d.openingFloatPaise, ...(counted[d.terminalId] != null ? { countedPaise: counted[d.terminalId] } : {}) })),
     invoiceRanges: invoiceRangesFrom(i.invoices),
   });
-  const zPlan = zClosePlan(ctx, { businessDate: i.businessDate, zNo, z, snapshot: snapshotFromLedger(i.prevSnapshot ?? {}, stats.stock), ...(i.approver ? { approver: i.approver } : {}) });
+  const zPlan = zClosePlan(ctx, {
+    businessDate: i.businessDate,
+    zNo,
+    z,
+    snapshot: snapshotFromLedger(i.prevSnapshot ?? {}, stats.stock),
+    ...(i.approver ? { approver: i.approver } : {}),
+    // No day record (wiped while the till kept the day open): it counts as opened at that day's start.
+    ...(i.day ? {} : { opened: { atMs: Date.parse(`${i.businessDate}T00:00:00+05:30`), by: ctx.actorId } }),
+  });
   return { plan: { label: `Close day ${i.businessDate}`, ops: [...ops, ...zPlan.ops], primaryPath: zPlan.primaryPath }, z, zNo };
 }
 
