@@ -4,21 +4,31 @@ import { logoRows, type Cols, type ReceiptLine, type ReceiptLogo } from "@px-pos
 /** Rows per GS v 0 band: small enough for printers with tiny buffers and band-height limits. */
 const BAND = 24;
 
+/** Print-head width in dots: 58 mm paper (32 columns) is 384, 80 mm (48 columns) is 576. */
+export const paperDots = (cols: Cols) => (cols === 48 ? 576 : 384);
+
 /**
- * The logo as centred ESC/POS raster bands (GS v 0). Alignment is set and reset here because
- * the encoder only emits it for text lines.
+ * The logo as ESC/POS raster bands (GS v 0) the full width of the paper, centred inside the
+ * image itself. Some built-in printers (the Aclas board in the TVS TP-482C) only take full-width
+ * rows — Aclas's own driver always sends 48-byte rows in 24-line bands — and read a narrower
+ * image as if it were full width, swallowing the rest of the bill (feed and cut included).
  */
-export function logoBytes(logo: ReceiptLogo): Uint8Array | null {
+export function logoBytes(logo: ReceiptLogo, dots = 384): Uint8Array | null {
   const rows = logoRows(logo);
   if (!rows) return null;
   const wb = logo.w / 8;
-  const out: number[] = [0x1b, 0x61, 0x01];
+  const full = Math.max(wb, Math.floor(dots / 8));
+  const left = Math.floor((full - wb) / 2);
+  const out: number[] = [];
   for (let y = 0; y < logo.h; y += BAND) {
     const h = Math.min(BAND, logo.h - y);
-    out.push(0x1d, 0x76, 0x30, 0x00, wb & 0xff, wb >> 8, h & 0xff, h >> 8);
-    for (let i = y * wb; i < (y + h) * wb; i++) out.push(rows[i]!);
+    out.push(0x1d, 0x76, 0x30, 0x00, full & 0xff, full >> 8, h & 0xff, h >> 8);
+    for (let r = y; r < y + h; r++) {
+      const line = new Array<number>(full).fill(0);
+      for (let b = 0; b < wb; b++) line[left + b] = rows[r * wb + b]!;
+      out.push(...line);
+    }
   }
-  out.push(0x1b, 0x61, 0x00);
   return Uint8Array.from(out);
 }
 
@@ -36,7 +46,7 @@ export function encodeReceipt(lines: ReceiptLine[], cols: Cols): Uint8Array {
   enc.initialize();
   for (const l of lines) {
     if (l.kind === "image") {
-      const bytes = logoBytes(l.logo);
+      const bytes = logoBytes(l.logo, paperDots(cols));
       if (!bytes) continue;
       parts.push(enc.encode(), bytes);
       enc = encoder(cols);

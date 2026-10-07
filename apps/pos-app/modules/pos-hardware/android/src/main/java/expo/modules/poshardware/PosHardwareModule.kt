@@ -273,18 +273,45 @@ class PosHardwareModule : Module() {
     val conn = usb.openDevice(device) ?: throw IllegalStateException("Could not open the printer")
     try {
       if (!conn.claimInterface(intf, true)) throw IllegalStateException("The printer is busy")
-      var off = 0
-      while (off < bytes.size) {
-        // The offset overload of bulkTransfer needs API 28; the TP-482C runs API 27.
-        val chunk = bytes.copyOfRange(off, minOf(off + CHUNK, bytes.size))
-        val n = conn.bulkTransfer(out, chunk, chunk.size, TIMEOUT_MS)
-        if (n <= 0) throw IllegalStateException("The printer stopped responding (out of paper or lid open?)")
-        off += n
+      // Split before every raster band (GS v 0) and pause after each one, like Aclas's own driver
+      // (it waits for the printer before each 24-line band): sent in one burst, the board prints
+      // the bands without feeding paper between them and the logo piles up in one spot.
+      val cuts = rasterStarts(bytes) + bytes.size
+      var from = 0
+      for (to in cuts) {
+        if (to <= from) continue
+        var off = from
+        while (off < to) {
+          // The offset overload of bulkTransfer needs API 28; the TP-482C runs API 27.
+          val chunk = bytes.copyOfRange(off, minOf(off + CHUNK, to))
+          val n = conn.bulkTransfer(out, chunk, chunk.size, TIMEOUT_MS)
+          if (n <= 0) throw IllegalStateException("The printer stopped responding (out of paper or lid open?)")
+          off += n
+        }
+        if (isRaster(bytes, from) && to < bytes.size) Thread.sleep(PACE_MS)
+        from = to
       }
       conn.releaseInterface(intf)
     } finally {
       conn.close()
     }
+  }
+
+  private fun isRaster(b: ByteArray, i: Int) = i + 3 < b.size && b[i] == 0x1d.toByte() && b[i + 1] == 0x76.toByte() && b[i + 2] == 0x30.toByte() && b[i + 3] == 0x00.toByte()
+
+  /** Offsets where a GS v 0 raster band starts (the logo). */
+  private fun rasterStarts(b: ByteArray): List<Int> {
+    val out = ArrayList<Int>()
+    var i = 0
+    while (i < b.size - 7) {
+      if (isRaster(b, i)) {
+        out.add(i)
+        val w = (b[i + 4].toInt() and 0xff) or ((b[i + 5].toInt() and 0xff) shl 8)
+        val h = (b[i + 6].toInt() and 0xff) or ((b[i + 7].toInt() and 0xff) shl 8)
+        i += 8 + w * h // skip the image data: it may contain these bytes too
+      } else i++
+    }
+    return out
   }
 
   companion object {
@@ -294,6 +321,8 @@ class PosHardwareModule : Module() {
      */
     private val DRAWER_PULSE = byteArrayOf(0x1b, 0x71, 0x00, 0x3c, 0xff.toByte(), 0x1b, 0x43, 0x00, 0x00, 0x00)
     private const val CHUNK = 4096
+    /** About the time the head takes to print one 24-line band (3 mm). */
+    private const val PACE_MS = 60L
     private const val TIMEOUT_MS = 5000
   }
 }

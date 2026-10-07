@@ -22,7 +22,8 @@ import java.util.concurrent.Executors
  * It hangs off the printer board's HID interface (USB 6778:0112, /dev/hidrawN). Every command
  * is a frame `20 00 1F len | 0A cmd data… | ~xor 03` written as one HID output report whose id
  * (0x50…0x58) encodes the frame size; the board acks each frame with an input report whose
- * third byte is 0x1F. Pictures are 1-bit raster ("GS v 0"), 13 rows per frame, top to bottom.
+ * third byte is 0x1F. Pictures are 1-bit raster ("GS v 0"), 13 rows per frame, top to bottom,
+ * each after a clear (the only way to send the write position back to the top row).
  *
  * Updates are coalesced: only the newest picture is sent, and an unchanged picture isn't resent.
  */
@@ -107,6 +108,10 @@ class CustomerDisplay {
     var sent = 0
     var acked = 0
     try {
+      // The board has no "go to row 0": each picture continues from wherever its write position
+      // was left (another app's drawing, a lost frame, a different panel height), so pictures crept
+      // down over stale rows. Clearing first puts it back at the top every time.
+      p.command(CMD_CLEAR)
       var y = 0
       while (y < HEIGHT) {
         val rows = minOf(CHUNK_ROWS, HEIGHT - y)
