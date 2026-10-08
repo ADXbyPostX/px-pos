@@ -102,8 +102,18 @@ class CustomerDisplay {
     }
   }
 
+  /** Waits its turn on the board: never while a bill is printing or the drawer kicks (see Board). */
   private fun sendRaster(raster: ByteArray, force: Boolean): Pair<Int, Int> {
     if (!force && lastRaster?.contentEquals(raster) == true) return 0 to 0
+    Board.lock.lock()
+    try {
+      return sendRasterNow(raster)
+    } finally {
+      Board.lock.unlock()
+    }
+  }
+
+  private fun sendRasterNow(raster: ByteArray): Pair<Int, Int> {
     val p = open() ?: return 0 to 0
     var sent = 0
     var acked = 0

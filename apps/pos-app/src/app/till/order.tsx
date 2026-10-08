@@ -78,12 +78,17 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
   function onSettle(tenders: TenderInput[], tip: Paise) {
     try {
       let settled = false;
+      let kicked = false;
       if (quickPayFirst || (!order && mode !== "dineIn")) {
         const row = quickCheckout(deps, t.ticket, tenders, tip);
         const r = row.result!;
         const called = orderWhere(mode, { token: r.token, customer: t.ticket.customer });
         settled = true;
         setDone(r);
+        // Drawer first: on the TVS the drawer, printer and customer display share one board, which
+        // takes them one at a time (see pos-hardware Board), so the cash drawer opens at once.
+        void kickDrawerFor(tenders).then((err) => err && setNotice(`Cash drawer: ${err}`));
+        kicked = true;
         void printKots(session.terminal, session.client, r.kots.map((k) => ({ ...k, kind: "new" as const, mode, where: called, orderNo: r.orderNo, createdAtMs: Date.now(), station: k.station as "kitchen" })));
         void printInvoice(session.terminal, session.client, {
           invoiceNo: r.invoiceNo,
@@ -105,8 +110,8 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
         customerDisplay.thanks(row.result?.changePaise ?? 0);
         router.replace(mode === "dineIn" ? "/till/tables" : "/till/orders");
       }
-      // Only a payment that went through opens the drawer.
-      if (settled) void kickDrawerFor(tenders).then((err) => err && setNotice(`Cash drawer: ${err}`));
+      // Only a payment that went through opens the drawer (the quick checkout above already did).
+      if (settled && !kicked) void kickDrawerFor(tenders).then((err) => err && setNotice(`Cash drawer: ${err}`));
       setPaying(false);
       setShowTicket(false);
     } catch (e) {

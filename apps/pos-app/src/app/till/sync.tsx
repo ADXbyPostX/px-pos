@@ -76,7 +76,7 @@ export default function Sync() {
               </Text>
               {r.error ? <Text className="text-sm text-primary">{r.error}</Text> : null}
               {r.status === "rejected" ? (
-                <Button size="sm" variant="outline" className="mt-1 self-start" disabled={!s.online} onPress={() => retry(r)}>
+                <Button size="sm" variant="outline" className="mt-1 self-start" disabled={!s.online} onPress={() => void retry(r)}>
                   <Text>Retry</Text>
                 </Button>
               ) : null}

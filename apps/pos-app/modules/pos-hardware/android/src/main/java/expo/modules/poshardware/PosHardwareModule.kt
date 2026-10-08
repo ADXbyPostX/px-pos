@@ -7,11 +7,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.util.Base64
+import android.util.Log
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -49,6 +51,7 @@ class PosHardwareModule : Module() {
   private val crypto = Executors.newSingleThreadExecutor()
   private val display = CustomerDisplay()
   private val bluetooth = BluetoothPrinter()
+  private val kernel = KernelPrinter()
 
   override fun definition() = ModuleDefinition {
     Name("PosHardware")
@@ -70,6 +73,16 @@ class PosHardwareModule : Module() {
       val device = firstPrinter()
       if (device == null) {
         promise.reject("E_NO_PRINTER", "No USB printer is connected", null)
+        return@AsyncFunction
+      }
+      if (viaDriver(device)) {
+        jobs.execute {
+          try {
+            promise.resolve(kernel.status())
+          } catch (e: Exception) {
+            promise.reject("E_STATUS", e.message ?: "Could not read the printer status", e)
+          }
+        }
         return@AsyncFunction
       }
       withPermission(device) { granted ->
@@ -105,6 +118,26 @@ class PosHardwareModule : Module() {
         promise.reject("E_NO_PRINTER", "No printer board to open the drawer with", null)
         return@AsyncFunction
       }
+      // Through the driver when it takes the pulse at once; a driver holding back (its printer says
+      // no paper) gets the direct USB path instead, which needs no paper.
+      if (viaDriver(device)) {
+        jobs.execute {
+          try {
+            var ok = false
+            onBoard(DRAWER_SETTLE_MS) {
+              ok = kernel.writeNow(DRAWER_PULSE)
+              if (!ok && usb.hasPermission(device)) {
+                send(device, DRAWER_PULSE)
+                ok = true
+              }
+            }
+            if (ok) promise.resolve(null) else promise.reject("E_DRAWER", "Couldn't open the cash drawer", null)
+          } catch (e: Exception) {
+            promise.reject("E_DRAWER", e.message ?: "Couldn't open the cash drawer", e)
+          }
+        }
+        return@AsyncFunction
+      }
       withPermission(device) { granted ->
         if (!granted) {
           promise.reject("E_USB_DENIED", "Permission to use the printer was refused", null)
@@ -113,7 +146,7 @@ class PosHardwareModule : Module() {
         jobs.execute {
           // No paper check: the drawer must open even when the printer is out of paper.
           try {
-            send(device, DRAWER_PULSE)
+            onBoard(DRAWER_SETTLE_MS) { send(device, DRAWER_PULSE) }
             promise.resolve(null)
           } catch (e: Exception) {
             promise.reject("E_DRAWER", e.message ?: "Couldn't open the cash drawer", e)
@@ -163,6 +196,20 @@ class PosHardwareModule : Module() {
         promise.reject("E_NO_PRINTER", "No USB printer is connected", null)
         return@AsyncFunction
       }
+      if (viaDriver(device)) {
+        jobs.execute {
+          try {
+            onBoard(Board.printMs(bytes)) {
+              checkReady(kernel.status())
+              kernel.write(bytes, pieces(bytes))
+            }
+            promise.resolve(null)
+          } catch (e: Exception) {
+            promise.reject("E_PRINT", e.message ?: "Printing failed", e)
+          }
+        }
+        return@AsyncFunction
+      }
       withPermission(device) { granted ->
         if (!granted) {
           promise.reject("E_USB_DENIED", "Permission to use the printer was refused", null)
@@ -170,12 +217,10 @@ class PosHardwareModule : Module() {
         }
         jobs.execute {
           try {
-            val st = status(device)
-            when {
-              st["coverOpen"] == true -> throw IllegalStateException("The printer cover is open. Close it until it clicks.")
-              st["paperOut"] == true -> throw IllegalStateException("The printer is out of paper (or the roll is in the wrong way round).")
+            onBoard(Board.printMs(bytes)) {
+              checkReady(status(device))
+              send(device, bytes)
             }
-            send(device, bytes)
             promise.resolve(null)
           } catch (e: Exception) {
             promise.reject("E_PRINT", e.message ?: "Printing failed", e)
@@ -185,10 +230,42 @@ class PosHardwareModule : Module() {
     }
   }
 
+  private fun checkReady(st: Map<String, Any?>) {
+    when {
+      st["coverOpen"] == true -> throw IllegalStateException("The printer cover is open. Close it until it clicks.")
+      st["paperOut"] == true -> throw IllegalStateException("The printer is out of paper (or the roll is in the wrong way round).")
+    }
+  }
+
+  /** Talk to the board alone, and keep it until the mechanism is done (see Board). */
+  private fun onBoard(holdMs: Long, block: () -> Unit) {
+    Board.lock.lock()
+    try {
+      val start = System.currentTimeMillis()
+      block()
+      val left = holdMs - (System.currentTimeMillis() - start)
+      if (left > 0) Thread.sleep(left)
+    } finally {
+      Board.lock.unlock()
+    }
+  }
+
+  /**
+   * The Aclas board's printer goes through its kernel driver whenever that's attached (see
+   * KernelPrinter); raw USB stays for other printers, and for a board whose driver a previous
+   * build detached (until the machine restarts).
+   */
+  private fun viaDriver(device: UsbDevice): Boolean {
+    if (device.vendorId != ACLAS) return false
+    val ok = kernel.usable()
+    if (!ok) Log.i(TAG, "Aclas printer driver not attached (restart the machine); using raw USB")
+    return ok
+  }
+
   /** Prefer the board's own printer (Aclas, 0x6778) over anything plugged into a USB socket. */
   private fun firstPrinter(): UsbDevice? {
     val printers = usb.deviceList.values.filter { printerPort(it) != null }
-    return printers.firstOrNull { it.vendorId == 0x6778 } ?: printers.firstOrNull()
+    return printers.firstOrNull { it.vendorId == ACLAS } ?: printers.firstOrNull()
   }
 
   private fun printerPort(d: UsbDevice): Pair<UsbInterface, UsbEndpoint>? {
@@ -270,16 +347,16 @@ class PosHardwareModule : Module() {
 
   private fun send(device: UsbDevice, bytes: ByteArray) {
     val (intf, out) = printerPort(device) ?: throw IllegalStateException("That USB device is not a printer")
+    val inEp = printerIn(intf)
     val conn = usb.openDevice(device) ?: throw IllegalStateException("Could not open the printer")
     try {
       if (!conn.claimInterface(intf, true)) throw IllegalStateException("The printer is busy")
-      // Split before every raster band (GS v 0) and pause after each one, like Aclas's own driver
-      // (it waits for the printer before each 24-line band): sent in one burst, the board prints
-      // the bands without feeding paper between them and the logo piles up in one spot.
-      val cuts = rasterStarts(bytes) + bytes.size
-      var from = 0
-      for (to in cuts) {
-        if (to <= from) continue
+      // Flow control. Built-in boards like the TP-482C's Aclas take bytes faster than they print
+      // and silently drop what overflows their buffer — a logo then ate a different chunk of every
+      // bill. So the job goes in pieces (each logo band whole, text cut only between lines), and
+      // after each piece the printer must answer GS r 1, which it does only once everything sent
+      // before it has been processed. A printer that never answers gets timed pauses instead.
+      for ((from, to) in pieces(bytes)) {
         var off = from
         while (off < to) {
           // The offset overload of bulkTransfer needs API 28; the TP-482C runs API 27.
@@ -288,8 +365,7 @@ class PosHardwareModule : Module() {
           if (n <= 0) throw IllegalStateException("The printer stopped responding (out of paper or lid open?)")
           off += n
         }
-        if (isRaster(bytes, from) && to < bytes.size) Thread.sleep(PACE_MS)
-        from = to
+        if (to < bytes.size) waitForPrinter(conn, out, inEp, isRaster(bytes, from))
       }
       conn.releaseInterface(intf)
     } finally {
@@ -297,20 +373,56 @@ class PosHardwareModule : Module() {
     }
   }
 
+  /** Block until the printer has worked through what it was sent (GS r 1 answered), or pause. */
+  private fun waitForPrinter(conn: UsbDeviceConnection, out: UsbEndpoint, inEp: UsbEndpoint?, raster: Boolean) {
+    if (inEp != null && answersSync != false) {
+      val buf = ByteArray(64)
+      while (conn.bulkTransfer(inEp, buf, buf.size, 10) > 0) { /* drop stale replies */ }
+      if (conn.bulkTransfer(out, SYNC, SYNC.size, 1000) == SYNC.size) {
+        val got = conn.bulkTransfer(inEp, buf, buf.size, if (answersSync == true) SYNC_WAIT_MS else FIRST_SYNC_MS)
+        if (got > 0) {
+          if (answersSync == null) Log.i(TAG, "printer answers GS r: using it for flow control")
+          answersSync = true
+          return
+        }
+      }
+      if (answersSync == null) Log.i(TAG, "printer doesn't answer GS r: pacing by time")
+      if (answersSync == null) answersSync = false
+    }
+    Thread.sleep(if (raster) BAND_PAUSE_MS else TEXT_PAUSE_MS)
+  }
+
   private fun isRaster(b: ByteArray, i: Int) = i + 3 < b.size && b[i] == 0x1d.toByte() && b[i + 1] == 0x76.toByte() && b[i + 2] == 0x30.toByte() && b[i + 3] == 0x00.toByte()
 
-  /** Offsets where a GS v 0 raster band starts (the logo). */
-  private fun rasterStarts(b: ByteArray): List<Int> {
-    val out = ArrayList<Int>()
+  /**
+   * The job as (from, to-exclusive) pieces: each GS v 0 band on its own (never split — a sync inside it
+   * would be read as image data), text in ≤ TEXT_PIECE bytes cut only after a line feed, so a
+   * multi-byte command is never split either.
+   */
+  private fun pieces(b: ByteArray): List<Pair<Int, Int>> {
+    val out = ArrayList<Pair<Int, Int>>()
+    var start = 0
+    var lastBreak = -1
     var i = 0
-    while (i < b.size - 7) {
-      if (isRaster(b, i)) {
-        out.add(i)
+    fun cut(at: Int) {
+      if (at > start) out.add(start to at)
+      start = at
+      lastBreak = -1
+    }
+    while (i < b.size) {
+      if (isRaster(b, i) && i + 7 < b.size) {
+        cut(i)
         val w = (b[i + 4].toInt() and 0xff) or ((b[i + 5].toInt() and 0xff) shl 8)
         val h = (b[i + 6].toInt() and 0xff) or ((b[i + 7].toInt() and 0xff) shl 8)
-        i += 8 + w * h // skip the image data: it may contain these bytes too
-      } else i++
+        i = minOf(b.size, i + 8 + w * h)
+        cut(i)
+        continue
+      }
+      if (b[i] == 0x0a.toByte()) lastBreak = if (i + 1 < b.size && b[i + 1] == 0x0d.toByte()) i + 2 else i + 1
+      i++
+      if (i - start >= TEXT_PIECE && lastBreak > start) cut(lastBreak)
     }
+    cut(b.size)
     return out
   }
 
@@ -320,9 +432,22 @@ class PosHardwareModule : Module() {
      * ESC C 0. Sent through the printer's bulk pipe; works with or without paper.
      */
     private val DRAWER_PULSE = byteArrayOf(0x1b, 0x71, 0x00, 0x3c, 0xff.toByte(), 0x1b, 0x43, 0x00, 0x00, 0x00)
+    private const val ACLAS = 0x6778
+    /** The drawer solenoid's pulse, before anything else may use the board. */
+    private const val DRAWER_SETTLE_MS = 400L
     private const val CHUNK = 4096
-    /** About the time the head takes to print one 24-line band (3 mm). */
-    private const val PACE_MS = 60L
+    /** Text piece between syncs: a few receipt lines, far below any board's buffer. */
+    private const val TEXT_PIECE = 512
+    /** GS r 1: transmit paper sensor status — answered in sequence, after what came before it. */
+    private val SYNC = byteArrayOf(0x1d, 0x72, 0x01)
+    private const val FIRST_SYNC_MS = 1500
+    private const val SYNC_WAIT_MS = 5000
+    /** Without GS r: a dense 24-line band can take ~0.2 s to burn; a few text lines less. */
+    private const val BAND_PAUSE_MS = 250L
+    private const val TEXT_PAUSE_MS = 120L
+    private const val TAG = "PxPosHardware"
+    /** Whether this printer answers GS r (null until the first job finds out). */
+    @Volatile private var answersSync: Boolean? = null
     private const val TIMEOUT_MS = 5000
   }
 }
