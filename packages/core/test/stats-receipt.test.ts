@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeBill } from "../src/bill";
 import { countDenoms, expectedCash } from "../src/cash";
 import { presence } from "../src/presence";
-import { renderInvoice, renderKot, renderZ, receiptText } from "../src/receipt";
+import { RECEIPT_PARTS, renderInvoice, renderKot, renderZ, receiptText } from "../src/receipt";
 import type { InvoicePrint } from "../src/receipt";
 import { can, needsApproval } from "../src/roles";
 import {
@@ -236,6 +236,35 @@ describe("receipts", () => {
     expect(bos).toContain("BILL OF SUPPLY");
     expect(bos).toContain("Composition taxable person");
     expect(bos).not.toContain("CGST");
+  });
+  it("leaves off the parts the outlet hides, never the items or the totals", () => {
+    const hide = RECEIPT_PARTS.map((p) => p.part);
+    const quick = { ...print, mode: "quick" as const, token: 7 };
+    for (const cols of [32, 48] as const) {
+      const full = receiptText(renderInvoice(quick, settings, { copy: "ORIGINAL", cols }), cols);
+      expect(full).toContain("TOKEN 7");
+      const lines = renderInvoice(quick, { ...settings, showSac: false, hide }, { copy: "ORIGINAL", cols });
+      const raw = receiptText(lines, cols);
+      const text = raw.replace(/\s+/g, " ");
+      for (const gone of ["Demo Cafe", "Linking Road", "Ph:", "GSTIN", "FSSAI", "TAX INVOICE", "ORIGINAL", "Invoice:", "Date:", "Order:", "Quick", "Served by", "Place of supply", "Taxable value", "CGST", "SGST", "Paid", "Change", "SAC", "Reverse charge", "TOKEN"]) expect(text).not.toContain(gone);
+      expect(text).toContain("Fresh Lime Soda");
+      expect(text).toMatch(/Items \(3\) incl\. GST/);
+      expect(text).toMatch(/TOTAL\s+Rs\.\d/);
+      expect(text).toContain("Thank you! Visit again.");
+      // No rule at the top and never two in a row once the lines between them are gone.
+      expect(lines[0]?.kind).not.toBe("rule");
+      for (let i = 1; i < lines.length; i++) if (lines[i]?.kind === "rule") expect(lines[i - 1]?.kind === "rule" && (lines[i] as { char?: string }).char !== "=").toBe(false);
+    }
+  });
+  it("keeps order number and table apart when one is hidden; a reprint still says so", () => {
+    const noTable = receiptText(renderInvoice(print, { ...settings, hide: ["orderType"] }, { copy: "ORIGINAL", cols: 48 }), 48);
+    expect(noTable).toContain("Order: 1-001");
+    expect(noTable).not.toContain("Dine-in");
+    const tableOnly = receiptText(renderInvoice(print, { ...settings, hide: ["orderNo"] }, { copy: "ORIGINAL", cols: 48 }), 48);
+    expect(tableOnly).toMatch(/^Dine-in T4 {2}Covers 3$/m);
+    expect(tableOnly).not.toContain("Order:");
+    const reprint = receiptText(renderInvoice(print, { ...settings, hide: ["copy", "docTitle"] }, { copy: "REPRINT 2", cols: 48 }), 48);
+    expect(reprint).toContain("REPRINT 2");
   });
   it("leaves the FSSAI line out until the outlet adds its number", () => {
     const text = receiptText(renderInvoice({ ...print, supplier: { ...print.supplier, fssai: "" } }, settings, { copy: "ORIGINAL", cols: 48 }), 48);

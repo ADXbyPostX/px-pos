@@ -37,6 +37,7 @@ import { usePrincipal } from "@/components/providers/principal-provider";
 import { logoPreviewUrl } from "@/lib/receipt-logo";
 import { useRunPlan } from "@/lib/run-plan";
 import { ReceiptLogoField } from "./receipt-logo-field";
+import { ReceiptPartsField } from "./receipt-parts-field";
 
 type Draft = Client;
 
@@ -45,8 +46,10 @@ type Draft = Client;
  * left undefined: Firestore rejects undefined.
  */
 function withLogo(r: Client["receipt"], logo: Client["receipt"]["logo"]): Client["receipt"] {
-  const { header, footer, showSac } = r;
-  return logo ? { header, footer, showSac, logo, showLogo: true } : { header, footer, showSac };
+  const next = { ...r };
+  delete next.logo;
+  delete next.showLogo;
+  return logo ? { ...next, logo, showLogo: true } : next;
 }
 
 const APPROVALS: Array<{ key: ApprovalKey; label: string }> = [
@@ -312,16 +315,15 @@ export function SettingsView() {
             <Field label="Logo">
               <ReceiptLogoField value={d.receipt.logo} onChange={(logo) => set("receipt", withLogo(d.receipt, logo))} />
             </Field>
-            {d.receipt.logo ? <SwitchRow label="Print the logo instead of the outlet name" checked={d.receipt.showLogo !== false} onCheckedChange={(v) => set("receipt", { ...d.receipt, showLogo: v })} /> : null}
+            <ReceiptPartsField receipt={d.receipt} taxMode={d.taxMode} onChange={(r) => set("receipt", r)} />
             <Field label="Header lines (one per line)" htmlFor="st-header">
               <Textarea id="st-header" value={d.receipt.header.join("\n")} onChange={(e) => set("receipt", { ...d.receipt, header: e.target.value.split("\n").slice(0, 4) })} rows={3} />
             </Field>
             <Field label="Footer lines (one per line)" htmlFor="st-footer">
               <Textarea id="st-footer" value={d.receipt.footer.join("\n")} onChange={(e) => set("receipt", { ...d.receipt, footer: e.target.value.split("\n").slice(0, 4) })} rows={3} />
             </Field>
-            <SwitchRow label="Print SAC code 996331" checked={d.receipt.showSac} onCheckedChange={(v) => set("receipt", { ...d.receipt, showSac: v })} />
           </div>
-          <div aria-label="Receipt preview" className="max-h-[32rem] overflow-auto rounded-lg border bg-white px-3 py-3 font-mono text-[11px] leading-snug text-black">
+          <div aria-label="Receipt preview" className="max-h-[32rem] self-start overflow-auto rounded-lg border bg-white px-3 py-3 font-mono text-[11px] leading-snug text-black">
             {logoUrl && d.receipt.logo && d.receipt.showLogo !== false ? (
               // 12 printer dots per character column (384 dots = 32 columns on 58 mm), so it's to scale.
               // eslint-disable-next-line @next/next/no-img-element

@@ -149,7 +149,7 @@ export interface Client extends Meta {
   invoicePrefix: string;
   discountCapBps: Record<StaffRole, Bps>;
   approvals: Approvals;
-  receipt: { header: string[]; footer: string[]; showSac: boolean; logo?: ReceiptLogo; /** Missing = on. */ showLogo?: boolean };
+  receipt: { header: string[]; footer: string[]; showSac: boolean; logo?: ReceiptLogo; /** Missing = on. */ showLogo?: boolean; /** Parts left off the bill. Missing = everything prints. */ hide?: ReceiptPart[] };
   kds: { warnMin: number; lateMin: number };
   stockAutoOff: boolean;
   lastZNo: number;
@@ -161,6 +161,13 @@ export interface Client extends Meta {
  * The outlet's logo as the printer draws it (admin › Settings › Receipt): a 1-bit raster,
  * rows top to bottom, w/8 bytes per row, leftmost dot in the high bit, 1 = black.
  */
+/**
+ * Lines of a bill the outlet can leave off (admin › Settings › Receipt). The items, the items
+ * total and TOTAL always print; so do amounts that change the total (discounts, charges, round
+ * off), a buyer's details, and DUPLICATE / REPRINT / CANCELLED marks.
+ */
+export type ReceiptPart = "name" | "address" | "phone" | "gstin" | "fssai" | "docTitle" | "copy" | "invoiceNo" | "date" | "orderNo" | "orderType" | "staff" | "placeOfSupply" | "taxes" | "payments" | "taxNote" | "token";
+
 export interface ReceiptLogo {
   /** Dots wide, a multiple of 8 (58 mm paper is 384 dots). */
   w: number;

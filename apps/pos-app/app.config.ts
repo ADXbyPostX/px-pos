@@ -1,4 +1,9 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import pkg from "./package.json";
+
+/** The app's version lives in package.json; Android's versionCode follows it (1.0.1 → 10001). */
+const version = pkg.version;
+const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
 
 /**
  * PX POS terminal. Dev build only (never Expo Go): @react-native-firebase is native.
@@ -11,13 +16,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: "PX POS",
   slug: "px-pos",
   scheme: "pxpos",
-  version: "0.1.0",
+  version,
   orientation: "default",
   userInterfaceStyle: "dark",
   backgroundColor: "#000000",
   icon: "./assets/generated/icon.png",
   ios: {
     bundleIdentifier: "in.postx.pxpos",
+    buildNumber: version,
     supportsTablet: true,
     requireFullScreen: true,
     googleServicesFile: process.env.GOOGLE_SERVICE_INFO_PLIST ?? "./GoogleService-Info.plist",
@@ -28,6 +34,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: "in.postx.pxpos",
+    versionCode: major * 10000 + minor * 100 + patch,
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
     adaptiveIcon: {
       foregroundImage: "./assets/generated/adaptive-foreground.png",

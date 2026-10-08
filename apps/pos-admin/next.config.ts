@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import pkg from "./package.json";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -23,6 +24,8 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // Shown in the sidebar footer; bump `version` in package.json for each release.
+  env: { NEXT_PUBLIC_APP_VERSION: pkg.version },
   async headers() {
     return [
       {

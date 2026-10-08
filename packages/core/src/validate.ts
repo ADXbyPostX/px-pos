@@ -1,5 +1,6 @@
 import { validateReceiptLogo } from "./logo";
 import { isValidInvoicePrefix } from "./numbering";
+import { RECEIPT_PARTS } from "./receipt";
 import { EXPENSE_CATEGORIES, ORDER_MODES, STAFF_ROLES } from "./types";
 import type { Buyer, Client, Expense, Item, Paise, TaxMode } from "./types";
 import { validateVpa } from "./upi";
@@ -147,6 +148,7 @@ export function validateClient(c: Partial<Client>): string | null {
     const l = validateReceiptLogo(c.receipt.logo);
     if (l) return `Receipt logo: ${l.charAt(0).toLowerCase()}${l.slice(1)}`;
   }
+  if (c.receipt?.hide && !(Array.isArray(c.receipt.hide) && c.receipt.hide.every((p) => RECEIPT_PARTS.some((x) => x.part === p)))) return "The receipt lists a part it doesn't know";
   // A regular outlet may wait for its GSTIN (bills omit the line; admin flags it as missing).
   if (c.invoicePrefix != null && !isValidInvoicePrefix(c.invoicePrefix)) return "Invoice prefix: up to 2 capital letters";
   if (c.defaultTaxBps != null && !(TAX_RATES as readonly number[]).includes(c.defaultTaxBps)) return "Default tax rate is invalid";

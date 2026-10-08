@@ -11,7 +11,7 @@ import { useLiveDoc, type WithId } from "@/hooks/use-live";
 import { counterKey, getMeta, journalCounts, seedCounter, setMeta } from "@/local/db";
 import { applyNumberingRestart } from "@/local/sync";
 
-export const APP_VERSION = (Constants.expoConfig?.version as string | undefined) ?? "0.1.0";
+export const APP_VERSION = (Constants.expoConfig?.version as string | undefined) ?? "1.0.1";
 
 export type Session =
   | { status: "booting" }

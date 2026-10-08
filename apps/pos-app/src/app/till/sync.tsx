@@ -7,6 +7,7 @@ import { HardwarePanel } from "@/components/pos/hardware-panel";
 import { journalRows, type JournalRow, type JournalStatus } from "@/local/db";
 import { onJournalChange, reconcile, retry } from "@/local/sync";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/state/session";
 import { useSync } from "@/state/sync";
 
 const TABS: { key: JournalStatus; label: string }[] = [
@@ -51,6 +52,7 @@ export default function Sync() {
           </Pressable>
         ))}
         <View className="flex-1" />
+        <Text className="text-sm text-muted-foreground">v{APP_VERSION}</Text>
         <Text className={cn("text-sm", s.online ? "text-success" : "text-muted-foreground")}>{s.online ? "Online" : "Offline"}</Text>
         <Button size="sm" variant="secondary" disabled={busy || !s.online} onPress={runReconcile}>
           <Text>{busy ? "Checking…" : "Check now"}</Text>

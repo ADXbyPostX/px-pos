@@ -11,7 +11,7 @@ import { pinLength, pinMatches } from "@/lib/pin";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useOperator } from "@/state/operator";
-import { usePaired } from "@/state/session";
+import { APP_VERSION, usePaired } from "@/state/session";
 import { BrandImage } from "./brand-image";
 import { Keypad } from "./keypad";
 import { SyncPill } from "./sync-pill";
@@ -163,7 +163,8 @@ export function LockScreen() {
           </ScrollView>
         </>
       )}
-      <View className="flex-row justify-end px-6 pb-4">
+      <View className="flex-row items-center justify-between px-6 pb-4">
+        <Text className="text-sm text-muted-foreground">v{APP_VERSION}</Text>
         <SyncPill />
       </View>
     </View>

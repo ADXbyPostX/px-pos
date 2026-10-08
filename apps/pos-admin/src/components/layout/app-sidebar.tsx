@@ -164,6 +164,7 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t">
         <NavUser />
+        <p className="px-2 text-xs text-muted-foreground tabular-nums group-data-[collapsible=icon]:hidden">PX POS v{process.env.NEXT_PUBLIC_APP_VERSION}</p>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

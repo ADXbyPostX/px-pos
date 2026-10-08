@@ -3,7 +3,7 @@ import { MODE_LABEL, STATION_LABEL } from "./kot";
 import { validateReceiptLogo } from "./logo";
 import { formatINR } from "./money";
 import { istDateTimeLabel, istDateLabel } from "./time";
-import type { BillResult, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, Supplier, ZReport } from "./types";
+import type { BillResult, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, ZReport } from "./types";
 
 /**
  * Printer-neutral receipt model. ASCII only: ESC/POS code pages have no ₹, so printed
@@ -124,34 +124,78 @@ export interface ReceiptSettings {
   logo?: ReceiptLogo;
   /** Switch the logo off without deleting it. Missing = on. */
   showLogo?: boolean;
+  /** Lines the outlet leaves off its bills. Missing = everything prints. */
+  hide?: ReceiptPart[];
+}
+
+/** The optional parts of a bill, in print order (admin lists them in this order). */
+export const RECEIPT_PARTS: ReadonlyArray<{ part: ReceiptPart; label: string }> = [
+  { part: "name", label: "Outlet name" },
+  { part: "address", label: "Address" },
+  { part: "phone", label: "Phone" },
+  { part: "gstin", label: "GSTIN" },
+  { part: "fssai", label: "FSSAI licence no." },
+  { part: "docTitle", label: "Tax invoice heading" },
+  { part: "copy", label: "Original for recipient" },
+  { part: "invoiceNo", label: "Invoice number" },
+  { part: "date", label: "Date and time" },
+  { part: "orderNo", label: "Order number" },
+  { part: "orderType", label: "Order type and table" },
+  { part: "staff", label: "Served by" },
+  { part: "placeOfSupply", label: "Place of supply" },
+  { part: "taxes", label: "Taxable value and GST" },
+  { part: "payments", label: "Paid by and change" },
+  { part: "taxNote", label: "Reverse charge line" },
+  { part: "token", label: "Token number" },
+];
+
+/** Drops a rule at the very top and a rule right after another (when the parts between are hidden). */
+function tidyRules(lines: ReceiptLine[]): ReceiptLine[] {
+  const out: ReceiptLine[] = [];
+  for (const l of lines) {
+    const prev = out[out.length - 1];
+    if (l.kind === "rule" && (!prev || (prev.kind === "rule" && l.char !== "="))) continue;
+    if (l.kind === "rule" && prev?.kind === "rule" && prev.char !== "=") out.pop();
+    out.push(l);
+  }
+  return out;
 }
 
 export const RESTAURANT_SAC = "996331";
 export const COMPOSITION_DECLARATION = "Composition taxable person, not eligible to collect tax on supplies";
 
-/** Tax invoice / bill of supply for a thermal printer. */
+/**
+ * Tax invoice / bill of supply for a thermal printer. Parts in `settings.hide` are left off; the
+ * items, their total and TOTAL always print.
+ */
 export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts: { copy: CopyLabel; cols: Cols }): ReceiptLine[] {
   const { cols } = opts;
   const out: ReceiptLine[] = [];
   const s = inv.supplier;
+  const hidden = new Set(settings.hide ?? []);
+  const show = (p: ReceiptPart) => !hidden.has(p);
   // The logo replaces the name (Mandy, 2026-10-05); address, GSTIN and FSSAI still follow.
   if (settings.logo && settings.showLogo !== false && !validateReceiptLogo(settings.logo)) out.push({ kind: "image", logo: settings.logo }, { kind: "feed", lines: 1 });
-  else out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
-  for (const l of wrap(s.address, cols)) out.push(center(l));
-  if (s.phone) out.push(center(`Ph: ${s.phone}`));
-  if (s.gstin) out.push(center(`GSTIN: ${s.gstin}`));
-  if (s.fssai) out.push(center(`FSSAI Lic. No: ${s.fssai}`));
+  else if (show("name")) out.push(center(s.legalName, { bold: true, size: cols === 48 ? 2 : 1 }));
+  if (show("address")) for (const l of wrap(s.address, cols)) out.push(center(l));
+  if (s.phone && show("phone")) out.push(center(`Ph: ${s.phone}`));
+  if (s.gstin && show("gstin")) out.push(center(`GSTIN: ${s.gstin}`));
+  if (s.fssai && show("fssai")) out.push(center(`FSSAI Lic. No: ${s.fssai}`));
   for (const h of settings.header) for (const l of wrap(h, cols)) out.push(center(l));
   out.push(rule());
-  out.push(center(inv.docType === "tax_invoice" ? "TAX INVOICE" : "BILL OF SUPPLY", { bold: true }));
-  out.push(center(opts.copy === "ORIGINAL" ? "ORIGINAL FOR RECIPIENT" : opts.copy, { bold: opts.copy !== "ORIGINAL" }));
+  if (show("docTitle")) out.push(center(inv.docType === "tax_invoice" ? "TAX INVOICE" : "BILL OF SUPPLY", { bold: true }));
+  // A duplicate or reprint always says so.
+  if (opts.copy !== "ORIGINAL") out.push(center(opts.copy, { bold: true }));
+  else if (show("copy")) out.push(center("ORIGINAL FOR RECIPIENT"));
   if (inv.cancelled) out.push(center("*** CANCELLED ***", { bold: true, invert: true }));
-  out.push(t(`Invoice: ${inv.invoiceNo}`, { bold: true }));
-  out.push(t(`Date: ${istDateTimeLabel(inv.issuedAtMs)}`));
-  const covers = inv.covers ? `  Covers ${inv.covers}` : "";
-  for (const l of lrLines(`Order: ${inv.orderNo}`, `${MODE_LABEL[inv.mode]} ${inv.where}${covers}`, cols)) out.push(t(l));
-  if (inv.staffName) out.push(t(`Served by: ${inv.staffName}`));
-  out.push(t(`Place of supply: ${s.stateName} (${s.stateCode})`));
+  if (show("invoiceNo")) out.push(t(`Invoice: ${inv.invoiceNo}`, { bold: true }));
+  if (show("date")) out.push(t(`Date: ${istDateTimeLabel(inv.issuedAtMs)}`));
+  const orderNo = show("orderNo") ? `Order: ${inv.orderNo}` : "";
+  const orderType = show("orderType") ? `${MODE_LABEL[inv.mode]} ${inv.where}${inv.covers ? `  Covers ${inv.covers}` : ""}` : "";
+  if (orderNo && orderType) for (const l of lrLines(orderNo, orderType, cols)) out.push(t(l));
+  else if (orderNo || orderType) out.push(t(orderNo || orderType));
+  if (inv.staffName && show("staff")) out.push(t(`Served by: ${inv.staffName}`));
+  if (show("placeOfSupply")) out.push(t(`Place of supply: ${s.stateName} (${s.stateCode})`));
   if (inv.buyer?.name || inv.buyer?.gstin) {
     out.push(rule());
     if (inv.buyer.name) out.push(t(`Bill to: ${inv.buyer.name}`));
@@ -186,7 +230,7 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
     const label = c.kind === "packaging" ? "Packaging charge" : c.kind === "delivery" ? "Delivery charge" : "Service charge (optional)";
     out.push(t(lr(label, money(c.amountPaise), cols)));
   }
-  if (inv.docType === "tax_invoice") {
+  if (inv.docType === "tax_invoice" && show("taxes")) {
     out.push(t(lr("Taxable value", money(b.taxablePaise), cols)));
     for (const tx of b.taxes) {
       if (tx.bps === 0) continue;
@@ -200,7 +244,7 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   out.push(t(lr("TOTAL", rs(b.grandTotalPaise), cols === 48 ? cols / 2 : cols), { bold: true, size: cols === 48 ? 2 : 1 }));
   out.push(rule("="));
 
-  if (inv.payments?.length) {
+  if (inv.payments?.length && show("payments")) {
     for (const p of inv.payments) {
       const ref = p.ref ? ` #${p.ref.slice(-6)}` : "";
       if (p.mode === "cash" && p.tenderedPaise != null) {
@@ -210,10 +254,10 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
     }
     if (inv.tipPaise) out.push(t(lr("Tip (not taxable)", money(inv.tipPaise), cols)));
   }
-  if (inv.docType === "bill_of_supply") for (const l of wrap(COMPOSITION_DECLARATION, cols)) out.push(center(l));
+  if (inv.docType === "bill_of_supply" && show("taxNote")) for (const l of wrap(COMPOSITION_DECLARATION, cols)) out.push(center(l));
   if (settings.showSac && inv.docType === "tax_invoice") out.push(center(`SAC ${RESTAURANT_SAC}`));
-  if (inv.docType === "tax_invoice") out.push(center("Reverse charge: No"));
-  if (inv.token != null && inv.mode === "quick") {
+  if (inv.docType === "tax_invoice" && show("taxNote")) out.push(center("Reverse charge: No"));
+  if (inv.token != null && inv.mode === "quick" && show("token")) {
     out.push({ kind: "feed" });
     out.push(center(`TOKEN ${inv.token}`, { bold: true, size: 2 }));
   }
@@ -223,7 +267,7 @@ export function renderInvoice(inv: InvoicePrint, settings: ReceiptSettings, opts
   }
   out.push({ kind: "feed", lines: 2 });
   out.push({ kind: "cut" });
-  return fit(out, cols);
+  return fit(tidyRules(out), cols);
 }
 
 export interface KotPrint extends Pick<Kot, "kotNo" | "kind" | "mode" | "where" | "station" | "items" | "orderNo" | "createdAtMs"> {
