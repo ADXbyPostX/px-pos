@@ -38,3 +38,6 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 *.log
+
+# Gradle caches inside local Expo modules
+apps/pos-app/modules/*/android/.gradle/
