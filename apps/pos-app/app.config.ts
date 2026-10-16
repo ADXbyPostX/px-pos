@@ -42,6 +42,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: "#000000",
     },
     predictiveBackGestureEnabled: false,
+    // Left over from the dev tools and old storage access; the till uses none of them (Play asks about them).
+    blockedPermissions: ["android.permission.SYSTEM_ALERT_WINDOW", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"],
   },
   plugins: [
     "expo-router",
@@ -49,9 +51,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "@react-native-firebase/app",
     "@react-native-firebase/auth",
     // RNFB 26 pulls the Firebase iOS SDK via Swift Package Manager, which requires dynamic frameworks.
-    ["expo-build-properties", { ios: { useFrameworks: "dynamic" } }],
+    // Dev only: an emulator build talks plain HTTP to the local Firebase emulators.
+    ["expo-build-properties", { ios: { useFrameworks: "dynamic" }, ...(process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST ? { android: { usesCleartextTraffic: true } } : {}) }],
     "expo-screen-orientation",
     "expo-sqlite",
+    // Upload key for Google Play (see the plugin).
+    "./plugins/with-release-signing",
   ],
   experiments: {
     typedRoutes: true,

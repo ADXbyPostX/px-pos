@@ -1,7 +1,8 @@
 import "client-only";
 import { getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
-import { createUserWithEmailAndPassword, getAuth, inMemoryPersistence, initializeAuth, signOut, type Auth } from "firebase/auth";
+import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, inMemoryPersistence, initializeAuth, signOut, type Auth } from "firebase/auth";
 import {
+  connectFirestoreEmulator,
   getFirestore,
   initializeFirestore,
   memoryLocalCache,
@@ -25,6 +26,14 @@ const config: FirebaseOptions = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+/**
+ * Dev only: a host running the Firebase emulators (Firestore :8080, Auth :9099), e.g.
+ * 127.0.0.1. Set it to run the admin against local demo data; production never sets it.
+ * NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT moves Firestore off 8080 when something else holds it.
+ */
+const emulatorHost = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST;
+const firestoreEmulatorPort = Number(process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT) || 8080;
+
 export const firebaseConfigured = Boolean(config.apiKey && config.projectId && config.appId);
 
 let app: FirebaseApp | undefined;
@@ -47,6 +56,7 @@ export function getDb(): Firestore {
       // IndexedDB cache shared across tabs in the browser; memory during any server evaluation.
       localCache: typeof window === "undefined" ? memoryLocalCache() : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
+    if (emulatorHost) connectFirestoreEmulator(db, emulatorHost, firestoreEmulatorPort);
   } catch {
     // Already initialised (hot reload) — reuse the existing instance.
     db = getFirestore(a);
@@ -55,7 +65,10 @@ export function getDb(): Firestore {
 }
 
 export function getAuthInstance(): Auth {
-  auth ??= getAuth(getFirebaseApp());
+  if (!auth) {
+    auth = getAuth(getFirebaseApp());
+    if (emulatorHost) connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
+  }
   return auth;
 }
 

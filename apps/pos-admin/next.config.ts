@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 import pkg from "./package.json";
 
 const isDev = process.env.NODE_ENV === "development";
+// Dev only: local Firebase emulators (see src/lib/firebase/client.ts).
+const emu = process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_HOST;
+const emuFirestorePort = process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT || "8080";
 
 /**
  * Content Security Policy without nonces (pages stay static). The admin only talks to
@@ -14,7 +17,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self'",
-  "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com",
+  `connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com${emu ? ` http://${emu}:${emuFirestorePort} http://${emu}:9099` : ""}`,
   "frame-src https://*.firebaseapp.com",
   "object-src 'none'",
   "base-uri 'self'",
