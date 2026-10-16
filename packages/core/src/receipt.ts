@@ -2,8 +2,8 @@ import { halfRateLabel } from "./bill";
 import { MODE_LABEL, STATION_LABEL } from "./kot";
 import { validateReceiptLogo } from "./logo";
 import { formatINR } from "./money";
-import { istDateTimeLabel, istDateLabel } from "./time";
-import type { BillResult, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, ZReport } from "./types";
+import { bizDateLabel, istDateTimeLabel, istDateLabel } from "./time";
+import type { BillResult, BizDate, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, VendorPayMode, ZReport } from "./types";
 
 /**
  * Printer-neutral receipt model. ASCII only: ESC/POS code pages have no ₹, so printed
@@ -24,6 +24,8 @@ export type CopyLabel = "ORIGINAL" | "DUPLICATE" | `REPRINT ${number}`;
 const money = (p: Paise) => formatINR(p, { symbol: false });
 const rs = (p: Paise) => `Rs.${formatINR(p, { symbol: false })}`;
 const PAY_LABEL: Record<PayMode, string> = { cash: "Cash", card: "Card", upi: "UPI", other: "Other" };
+/** Vendor payment ways on paper (ASCII, short enough for 32 columns). */
+const VENDOR_PAY_PRINT: Record<VendorPayMode, string> = { drawer: "Till cash", cash: "Other cash", upi: "UPI", bank: "Bank", cheque: "Cheque", other: "Other" };
 
 const t = (text: string, opts: Omit<Extract<ReceiptLine, { kind: "text" }>, "kind" | "text"> = {}): ReceiptLine => ({ kind: "text", text, ...opts });
 const center = (text: string, opts: Omit<Extract<ReceiptLine, { kind: "text" }>, "kind" | "text" | "align"> = {}) => t(text, { ...opts, align: "center" });
@@ -346,6 +348,12 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
   out.push(t(lr(`Cancelled bills (${z.cancelledBills.n})`, money(z.cancelledBills.paise), cols)));
   out.push(t(lr(`Voided items (${z.voidItems.n})`, money(z.voidItems.paise), cols)));
   row("Expenses", z.expensesPaise);
+  // Vendor lines appear only when there were any, so older Z reports print exactly as before.
+  if (z.purchasesPaise) row(`Bought (${z.purchaseBills ?? 0} bills)`, z.purchasesPaise);
+  if (z.vendorPaidPaise) {
+    row("Paid to vendors", z.vendorPaidPaise);
+    for (const [m, v] of Object.entries(z.vendorPaidByMode ?? {})) if (v) row(`  ${VENDOR_PAY_PRINT[m as VendorPayMode] ?? m}`, v);
+  }
   for (const d of z.drawers) {
     out.push(rule());
     out.push(t(`DRAWER ${opts.terminalNames?.[d.terminalId] ?? d.terminalId}`, { bold: true }));
@@ -353,7 +361,9 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
     row("Cash sales", d.cash.sales);
     if (d.cash.refunds) row("Cash refunds", -d.cash.refunds);
     if (d.cash.paidIn) row("Paid in", d.cash.paidIn);
-    if (d.cash.paidOut) row("Paid out (expenses)", -d.cash.paidOut);
+    const toVendors = d.cash.paidOutVendors ?? 0;
+    if (d.cash.paidOut - toVendors) row("Paid out (expenses)", -(d.cash.paidOut - toVendors));
+    if (toVendors) row("Paid to vendors", -toVendors);
     if (d.cash.drops) row("Cash drops", -d.cash.drops);
     out.push(t(lr("Expected in drawer", money(d.expectedPaise), cols), { bold: true }));
     if (d.countedPaise != null) {
@@ -369,6 +379,69 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
       out.push(t(`  ${r.first} .. ${r.last}`));
     }
   }
+  out.push({ kind: "feed", lines: 2 });
+  out.push({ kind: "cut" });
+  return fit(out, cols);
+}
+
+export interface VoucherPrint {
+  outletName: string;
+  vendorName: string;
+  amountPaise: Paise;
+  mode: VendorPayMode;
+  /** Till name for drawer cash ("Counter"). */
+  terminalName?: string;
+  ref?: string;
+  paidAtMs: number;
+  businessDate: BizDate;
+  paidBy?: string;
+  /** Short payment id printed as the voucher number. */
+  voucherNo: string;
+  /** What it cleared, oldest first (the payment preview at the moment it was paid). */
+  clears?: Array<{ billDate: BizDate; billNo?: string; appliedPaise: Paise; cleared: boolean }>;
+  olderPaise?: Paise;
+  /** What's still owed after it (negative = an advance the vendor holds). */
+  balanceAfterPaise?: Paise;
+  reprint?: boolean;
+  voided?: boolean;
+}
+
+/** A payment slip for the vendor to sign. */
+export function renderVoucher(v: VoucherPrint, opts: { cols: Cols }): ReceiptLine[] {
+  const { cols } = opts;
+  const out: ReceiptLine[] = [];
+  const row = (l: string, r: string, bold = false) => out.push(t(lr(l, r, cols), bold ? { bold: true } : {}));
+  out.push(center(v.outletName, { bold: true }));
+  out.push(center("PAYMENT VOUCHER", { bold: true }));
+  if (v.reprint) out.push(center("REPRINT", { bold: true }));
+  if (v.voided) out.push(center("*** VOID ***", { bold: true, invert: true }));
+  out.push(center(istDateTimeLabel(v.paidAtMs)));
+  out.push(rule());
+  row("Paid to", v.vendorName);
+  row("Amount", rs(v.amountPaise), true);
+  row("Way", `${VENDOR_PAY_PRINT[v.mode]}${v.mode === "drawer" && v.terminalName ? ` (${v.terminalName})` : ""}`);
+  if (v.ref) row("Ref", v.ref);
+  // What it cleared only on the original: a reprint can't vouch for dues that moved since.
+  if (!v.reprint && v.clears?.length) {
+    out.push(rule());
+    out.push(t("Clears", { bold: true }));
+    for (const c of v.clears) {
+      const label = ` ${bizDateLabel(c.billDate).slice(4)} ${c.billNo ? `bill ${c.billNo}` : "bill"}`;
+      row(label, `${money(c.appliedPaise)}${c.cleared ? "" : " part"}`);
+    }
+    if (v.olderPaise) row(" Older dues", money(v.olderPaise));
+  }
+  if (v.balanceAfterPaise != null) {
+    const bal = v.balanceAfterPaise;
+    row(v.reprint ? "Still owed now" : "Still owed", money(Math.max(bal, 0)));
+    if (bal < 0) row("Advance with vendor", money(-bal));
+  }
+  out.push(rule());
+  if (v.paidBy) row("Paid by", v.paidBy);
+  row("Voucher", v.voucherNo);
+  row("Business day", bizDateLabel(v.businessDate));
+  out.push({ kind: "feed", lines: 2 });
+  out.push(t(`Received by ${"_".repeat(cols - 12)}`));
   out.push({ kind: "feed", lines: 2 });
   out.push({ kind: "cut" });
   return fit(out, cols);

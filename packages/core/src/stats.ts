@@ -12,7 +12,9 @@ import type {
   OrderMode,
   Paise,
   PayMode,
+  Purchase,
   StatsDelta,
+  VendorPayment,
   ZReport,
 } from "./types";
 
@@ -272,6 +274,33 @@ export function cashMoveDelta(kind: CashMoveKind, amountPaise: Paise, terminalId
   return {};
 }
 
+/** A vendor bill on the business day it's entered ("Bought"). Opening balances never count. */
+export function purchaseDelta(p: Pick<Purchase, "kind" | "vendorId" | "totalPaise" | "gstPaise" | "lines">): StatsDelta {
+  if (p.kind === "opening") return {};
+  const d: StatsDelta = { purchasesPaise: p.totalPaise, purchaseBills: 1, purchaseGstPaise: p.gstPaise, purchByVendor: { [p.vendorId]: p.totalPaise } };
+  for (const l of p.lines) {
+    if (!l.materialId) continue;
+    addInto(d, { purchByMaterial: { [l.materialId]: { qty: l.qtyMilli, paise: l.amountPaise } } });
+  }
+  return prune(d);
+}
+
+export function purchaseVoidDelta(p: Pick<Purchase, "kind" | "vendorId" | "totalPaise" | "gstPaise" | "lines">): StatsDelta {
+  return negate(purchaseDelta(p));
+}
+
+/** Paid to a vendor. Drawer cash also counts as paid out of that till's drawer. */
+export function vendorPayDelta(p: Pick<VendorPayment, "kind" | "amountPaise" | "mode" | "drawerTerminalId">): StatsDelta {
+  if (p.kind === "opening") return {};
+  const d: StatsDelta = { vendorPaidPaise: p.amountPaise, vendorPaidByMode: { [p.mode]: p.amountPaise } };
+  if (p.mode === "drawer" && p.drawerTerminalId) addInto(d, { cash: { [p.drawerTerminalId]: { paidOut: p.amountPaise, paidOutVendors: p.amountPaise } } });
+  return prune(d);
+}
+
+export function vendorPayVoidDelta(p: Pick<VendorPayment, "kind" | "amountPaise" | "mode" | "drawerTerminalId">): StatsDelta {
+  return negate(vendorPayDelta(p));
+}
+
 export type StockMoveKind = "in" | "waste" | "adjust";
 
 /** Manual stock movement. `qty` is positive for in/waste; signed for adjust. */
@@ -292,7 +321,23 @@ export function np(v: unknown): NP {
 
 export function cashStats(v: unknown): CashStats {
   const o = (v ?? {}) as Partial<CashStats>;
-  return { sales: num(o.sales), refunds: num(o.refunds), paidIn: num(o.paidIn), paidOut: num(o.paidOut), drops: num(o.drops) };
+  const vendors = num(o.paidOutVendors);
+  return { sales: num(o.sales), refunds: num(o.refunds), paidIn: num(o.paidIn), paidOut: num(o.paidOut), drops: num(o.drops), ...(vendors ? { paidOutVendors: vendors } : {}) };
+}
+
+/** The day's vendor figures: bought (bills entered) and paid, by way. */
+export function vendorDay(s: Partial<DailyStats> | undefined): { boughtPaise: Paise; bills: number; gstPaise: Paise; paidPaise: Paise; paidByMode: Record<string, Paise> } {
+  const paidByMode: Record<string, Paise> = {};
+  for (const [k, v] of Object.entries(s?.vendorPaidByMode ?? {})) if (num(v)) paidByMode[k] = num(v);
+  return { boughtPaise: num(s?.purchasesPaise), bills: num(s?.purchaseBills), gstPaise: num(s?.purchaseGstPaise), paidPaise: num(s?.vendorPaidPaise), paidByMode };
+}
+
+/**
+ * Rough profit for a day: net sales (before GST) − vendor bills (GST included: no input tax
+ * credit at 5%) − expenses. Vendor payments only move cash, so they never count here.
+ */
+export function profitPaise(s: Partial<DailyStats> | undefined): Paise {
+  return netSales(s) - num(s?.purchasesPaise) - num(s?.expensesPaise);
 }
 
 /** Net sales (items' taxable value after discounts, excl. tax and charges). */
@@ -327,6 +372,7 @@ export interface ZInput {
   invoiceRanges: ZReport["invoiceRanges"];
 }
 
+/** paidOut already includes cash paid to vendors (paidOutVendors is only its breakdown). */
 export function expectedCashFor(floatPaise: Paise, c: CashStats): Paise {
   return floatPaise + c.sales - c.refunds + c.paidIn - c.paidOut - c.drops;
 }
@@ -345,6 +391,12 @@ export function zReport(z: ZInput): ZReport {
     const o = (v ?? {}) as { taxable?: number; cgst?: number; sgst?: number };
     byTaxBps[k] = { taxable: num(o.taxable), cgst: num(o.cgst), sgst: num(o.sgst) };
   }
+  // Vendor lines only when there are any, so a Z without vendors is shaped as before.
+  const vd = vendorDay(s);
+  const vendors: Partial<ZReport> = {
+    ...(vd.boughtPaise ? { purchasesPaise: vd.boughtPaise, purchaseBills: vd.bills } : {}),
+    ...(vd.paidPaise ? { vendorPaidPaise: vd.paidPaise, vendorPaidByMode: vd.paidByMode } : {}),
+  };
   return {
     zNo: z.zNo,
     businessDate: z.businessDate,
@@ -368,6 +420,7 @@ export function zReport(z: ZInput): ZReport {
     cancelledBills: np(s.cancelledBills),
     voidItems: np(s.voidItems),
     expensesPaise: num(s.expensesPaise),
+    ...vendors,
     drawers: z.drawers.map((d) => {
       const cash = cashStats((s.cash ?? {})[d.terminalId]);
       const expected = expectedCashFor(d.openingFloatPaise, cash);
@@ -407,6 +460,13 @@ export function emptyStats(businessDate: string): DailyStats {
     voidByReason: {},
     expensesPaise: 0,
     expByCat: {},
+    purchasesPaise: 0,
+    purchaseBills: 0,
+    purchaseGstPaise: 0,
+    purchByVendor: {},
+    purchByMaterial: {},
+    vendorPaidPaise: 0,
+    vendorPaidByMode: {},
     byMode: {},
     byPay: {},
     refundsByPay: {},

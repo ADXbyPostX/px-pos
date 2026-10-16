@@ -13,14 +13,14 @@ import { usePrincipal } from "@/components/providers/principal-provider";
 import { applyPlan, firestoreMessage } from "@/lib/firebase/apply-plan";
 import { getDb } from "@/lib/firebase/client";
 import { useDoc } from "@/lib/firebase/hooks";
-import { DEMO_CID, DEMO_NAME, demoHistoryPlans, demoSeedPlans } from "@/lib/demo-seed";
+import { DEMO_CID, DEMO_NAME, DEMO_VENDOR_ID, demoHistoryPlans, demoSeedPlans, demoVendorPlans } from "@/lib/demo-seed";
 import { newId } from "@/lib/ids";
 
 export function SeedView() {
   const { isSuper, planCtx } = usePrincipal();
   const demo = useDoc<Client>(paths.client(DEMO_CID));
   const [log, setLog] = useState<string[]>([]);
-  const [busy, setBusy] = useState<"seed" | "history" | null>(null);
+  const [busy, setBusy] = useState<"seed" | "history" | "vendors" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const append = (s: string) => setLog((l) => [...l, s]);
 
@@ -72,6 +72,29 @@ export function SeedView() {
     }
   }
 
+  async function vendors() {
+    if (!demo.data) return;
+    setBusy("vendors");
+    setError(null);
+    setLog([]);
+    try {
+      const db = getDb();
+      const exists = await getDoc(doc(db, paths.vendor(DEMO_CID, DEMO_VENDOR_ID)));
+      if (exists.exists()) throw new Error("Vendors already added.");
+      const today = businessDateFor(Date.now(), demo.data.day.cutoffMin);
+      const plans = demoVendorPlans(planCtx(DEMO_CID), today);
+      for (const [i, p] of plans.entries()) {
+        await applyPlan(p);
+        if (i % 10 === 9 || i === plans.length - 1) append(`${i + 1}/${plans.length} written`);
+      }
+      append("4 vendors, 9 materials and a month of bills and payments added.");
+    } catch (e) {
+      setError(firestoreMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <>
       <PageHeader title="Demo data" />
@@ -96,6 +119,20 @@ export function SeedView() {
             {busy === "history" ? <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden /> : null}
             Generate 30 days
           </Button>
+        </Panel>
+        <Panel title="Vendors" bodyClassName="flex flex-col gap-4 p-4">
+          <p className="text-sm text-muted-foreground">A dairy, a bakery, a gas agency and a wholesaler with a month of bills, weekly and part payments, gas paid on delivery and an opening balance.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={vendors} disabled={Boolean(busy) || !demo.data}>
+              {busy === "vendors" ? <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden /> : null}
+              Add vendors
+            </Button>
+            {demo.data ? (
+              <Button variant="outline" asChild>
+                <Link href={`/c/${DEMO_CID}/vendors`}>Open Vendors</Link>
+              </Button>
+            ) : null}
+          </div>
         </Panel>
       </div>
       {error ? (

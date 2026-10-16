@@ -217,6 +217,84 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "purchases",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "billDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "createdAtMs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "purchases",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "billDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "createdAtMs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "purchases",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "materialIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "billDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "vendorPayments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "businessDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "createdAtMs",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "vendorPayments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vendorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "businessDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "createdAtMs",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -410,6 +488,26 @@
     {
       "collectionGroup": "clients",
       "fieldPath": "receipt.logo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "dailyStats",
+      "fieldPath": "purchByVendor",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "dailyStats",
+      "fieldPath": "purchByMaterial",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "dailyStats",
+      "fieldPath": "vendorPaidByMode",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "purchases",
+      "fieldPath": "lines",
       "indexes": []
     }
   ]

@@ -1,8 +1,10 @@
 import { validateReceiptLogo } from "./logo";
 import { isValidInvoicePrefix } from "./numbering";
+import { phone10 } from "./paths";
 import { RECEIPT_PARTS } from "./receipt";
-import { EXPENSE_CATEGORIES, ORDER_MODES, STAFF_ROLES } from "./types";
-import type { Buyer, Client, Expense, Item, Paise, TaxMode } from "./types";
+import { isBizDate } from "./time";
+import { EXPENSE_CATEGORIES, MATERIAL_UNITS, ORDER_MODES, STAFF_ROLES, VENDOR_PAY_MODES } from "./types";
+import type { BizDate, Buyer, Client, Expense, Item, Material, MaterialUnit, Paise, PurchaseKind, TaxMode, Vendor, VendorPayMode } from "./types";
 import { validateVpa } from "./upi";
 
 /** GST state codes (for the client's place of supply). */
@@ -170,6 +172,85 @@ export function validateExpense(e: Partial<Expense>): string | null {
   if (!e.paidVia) return "Pick how it was paid";
   if (e.paidVia === "drawer" && !e.drawerTerminalId) return "Drawer expenses need a terminal";
   if (e.note && e.note.length > 200) return "Note is too long";
+  return null;
+}
+
+// ─── vendors ────────────────────────────────────────────────────────────────
+
+/** ₹1 crore: the most a single bill, line or payment can be (same cap as expenses). */
+const MAX_MONEY: Paise = 10_00_00_000;
+const isMoney = (v: unknown, max = MAX_MONEY) => typeof v === "number" && Number.isSafeInteger(v) && v > 0 && v <= max;
+
+export function validateVendor(v: Partial<Pick<Vendor, "name" | "phone" | "gstin" | "creditDays" | "note" | "materialIds">>): string | null {
+  if (!nonEmpty(v.name, 60)) return "Vendor name is required (max 60 characters)";
+  if (v.phone && !phone10(v.phone)) return "Enter a 10-digit mobile number";
+  if (v.gstin) {
+    const g = validateGstin(v.gstin);
+    if (g) return `Vendor's ${g}`;
+  }
+  if (typeof v.creditDays !== "number" || !Number.isInteger(v.creditDays) || v.creditDays < 0 || v.creditDays > 90) return "Credit days must be between 0 and 90";
+  if (v.note && v.note.length > 200) return "Note is too long (max 200 characters)";
+  if (v.materialIds && (v.materialIds.length > 50 || new Set(v.materialIds).size !== v.materialIds.length)) return "Pick up to 50 different materials";
+  return null;
+}
+
+export function validateMaterial(m: Partial<Pick<Material, "name" | "unit" | "taxBps">>): string | null {
+  if (!nonEmpty(m.name, 40)) return "Material name is required (max 40 characters)";
+  if (!m.unit || !(MATERIAL_UNITS as readonly string[]).includes(m.unit)) return "Pick a unit";
+  if (m.taxBps == null || !(TAX_RATES as readonly number[]).includes(m.taxBps)) return "Pick a GST rate";
+  return null;
+}
+
+export interface PurchaseCheck {
+  kind: PurchaseKind;
+  billDate: BizDate;
+  businessDate: BizDate;
+  lines: Array<{ lineId: string; name: string; qtyMilli: number; unit: MaterialUnit; amountPaise: Paise; taxBps: number }>;
+  adjustPaise?: Paise;
+  billNo?: string;
+  note?: string;
+  paidNow?: { amountPaise: Paise; mode: VendorPayMode };
+}
+
+/** `today` = the current business date: a bill can't be dated after it. */
+export function validatePurchase(p: PurchaseCheck, today?: BizDate): string | null {
+  if (!isBizDate(p.billDate)) return "Pick the bill date";
+  if (today && p.billDate > today) return "Bill date can't be in the future";
+  if (!isBizDate(p.businessDate)) return "Pick the business day";
+  if (p.kind === "bill") {
+    if (!p.lines.length) return "Add at least one item";
+    if (p.lines.length > 50) return "A bill can have at most 50 items";
+    if (new Set(p.lines.map((l) => l.lineId)).size !== p.lines.length) return "Duplicate line";
+    for (const [i, l] of p.lines.entries()) {
+      if (!nonEmpty(l.name, 60)) return `Line ${i + 1}: name the item`;
+      if (!Number.isSafeInteger(l.qtyMilli) || l.qtyMilli <= 0 || l.qtyMilli > 1_000_000_000) return `${l.name}: enter the quantity`;
+      if (!(MATERIAL_UNITS as readonly string[]).includes(l.unit)) return `${l.name}: pick a unit`;
+      if (!isMoney(l.amountPaise)) return `${l.name}: enter the amount`;
+      if (!(TAX_RATES as readonly number[]).includes(l.taxBps)) return `${l.name}: pick a GST rate`;
+    }
+  } else if (p.lines.length) return "An opening balance has no items";
+  const adjust = p.adjustPaise ?? 0;
+  if (!Number.isSafeInteger(adjust) || Math.abs(adjust) > 10000) return "Round off can be at most ₹100 either way";
+  const total = p.lines.reduce((s, l) => s + l.amountPaise, 0) + adjust;
+  if (total <= 0) return "The bill total must be more than ₹0";
+  if (total > MAX_MONEY) return "The bill total is too high";
+  if (p.billNo && p.billNo.length > 30) return "Bill number is too long (max 30 characters)";
+  if (p.note && p.note.length > 200) return "Note is too long (max 200 characters)";
+  if (p.paidNow) {
+    if (!isMoney(p.paidNow.amountPaise)) return "Enter the amount paid";
+    if (p.paidNow.amountPaise > total) return "Paid now can't be more than the bill";
+    if (!(VENDOR_PAY_MODES as readonly string[]).includes(p.paidNow.mode)) return "Pick how it was paid";
+  }
+  return null;
+}
+
+export function validateVendorPayment(p: { amountPaise: Paise; mode: VendorPayMode; businessDate: BizDate; ref?: string; note?: string }, today?: BizDate): string | null {
+  if (!isMoney(p.amountPaise)) return typeof p.amountPaise === "number" && p.amountPaise > MAX_MONEY ? "Amount is too high" : "Enter the amount";
+  if (!(VENDOR_PAY_MODES as readonly string[]).includes(p.mode)) return "Pick how it was paid";
+  if (!isBizDate(p.businessDate)) return "Pick the date";
+  if (today && p.businessDate > today) return "Date can't be in the future";
+  if (p.ref && p.ref.length > 40) return "Reference is too long (max 40 characters)";
+  if (p.note && p.note.length > 200) return "Note is too long (max 200 characters)";
   return null;
 }
 

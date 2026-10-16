@@ -395,5 +395,5 @@ export function voidUnusedInvoicePlan(ctx: PlanCtx, i: { invoiceId: string; invo
   };
 }
 
-/** Cash counters touched by a drawer on a day (convenience for the Day screen). */
+/** Cash counters touched by a drawer on a day (convenience for the Day screen). `paidOutVendors` is only a breakdown of paidOut — never add it here. */
 export const DRAWER_FIELDS = ["sales", "refunds", "paidIn", "paidOut", "drops"] as const;

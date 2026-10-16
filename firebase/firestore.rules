@@ -39,6 +39,12 @@ service cloud.firestore {
         && !exists(/databases/$(db)/documents/clients/$(c)/postings/$(k));
     }
 
+    // A document that may only be written in the same batch as its own posting (key from its id).
+    function postedNow(c, k) {
+      return existsAfter(/databases/$(db)/documents/clients/$(c)/postings/$(k))
+        && !exists(/databases/$(db)/documents/clients/$(c)/postings/$(k));
+    }
+
     // A terminal may only issue the next number of its own series (seq recorded on its terminal doc).
     function validInvoiceSeq(c) {
       let t = myTerminal(c);
@@ -197,6 +203,68 @@ service cloud.firestore {
         allow create: if canRead(c);
         allow update: if canRead(c) && (resource.data.status != 'closed' || canManage(c));
       }
+      // Vendors. Profiles change freely; the money totals move only together with a posting created in
+      // the same batch (like dailyStats). The key prefixes (vbill:, vbillx:, vpay:, vpayx:) mirror
+      // postingKey in packages/core/src/paths.ts. Nothing here checks whether a drawer or day is open
+      // or a vendor is active: offline batches must always land, so the till enforces those.
+      match /vendors/{id} {
+        function validVendor() {
+          let d = request.resource.data;
+          return d.name is string && d.name.size() > 0 && d.name.size() <= 60
+            && d.active is bool && d.creditDays is number && d.materialIds is list;
+        }
+        allow create: if canRead(c) && validVendor()
+          && request.resource.data.purchasedPaise == 0 && request.resource.data.paidPaise == 0
+          && !('lastPostingKey' in request.resource.data);
+        allow update: if isSuper()
+          || (canRead(c) && validVendor()
+              && !changed().hasAny(['purchasedPaise', 'paidPaise', 'lastPostingKey', 'lastPurchaseAtMs', 'lastPaymentAtMs']))
+          || (canRead(c) && posted(c)
+              && changed().hasOnly(['purchasedPaise', 'paidPaise', 'lastPostingKey', 'lastPurchaseAtMs', 'lastPaymentAtMs', 'materialIds', 'updatedAtMs']));
+      }
+      match /materials/{id} {
+        function validMaterial() {
+          let d = request.resource.data;
+          return d.name is string && d.name.size() > 0 && d.name.size() <= 40 && d.active is bool;
+        }
+        allow create: if canRead(c) && validMaterial();
+        // The unit is fixed once created (its price history would mix kg and g otherwise).
+        allow update: if canRead(c) && validMaterial() && !changed().hasAny(['unit']);
+      }
+      match /purchases/{id} {
+        allow create: if canRead(c)
+          && request.resource.data.status == 'active'
+          && request.resource.data.kind in ['bill', 'opening']
+          && request.resource.data.vendorId is string
+          && request.resource.data.totalPaise is number && request.resource.data.totalPaise > 0
+          && request.resource.data.lines is list && request.resource.data.lines.size() <= 50
+          && postedNow(c, 'vbill:' + id);
+        allow update: if canRead(c) && resource.data.status == 'active'
+          && ((request.resource.data.status == 'void'
+                && changed().hasOnly(['status', 'void', 'updatedAtMs'])
+                && postedNow(c, 'vbillx:' + id))
+              // A bill's number and note can be corrected (no money moves).
+              || changed().hasOnly(['billNo', 'note', 'updatedAtMs']));
+      }
+      match /vendorPayments/{id} {
+        allow create: if canRead(c)
+          && request.resource.data.status == 'active'
+          && request.resource.data.kind in ['payment', 'opening']
+          && request.resource.data.vendorId is string
+          && request.resource.data.amountPaise is number && request.resource.data.amountPaise > 0
+          // Till cash leaves only the drawer of the till writing it (never from admin).
+          && (request.resource.data.mode != 'drawer'
+              || (isMember(c) && request.resource.data.get('drawerTerminalId', '') == myTerminal(c)))
+          && (postedNow(c, 'vpay:' + id)
+              // Paid on delivery: the payment rides on its purchase's posting, created in this batch.
+              || (request.resource.data.get('purchaseId', '') != ''
+                  && postedNow(c, 'vbill:' + request.resource.data.get('purchaseId', ''))));
+        allow update: if canRead(c) && resource.data.status == 'active'
+          && request.resource.data.status == 'void'
+          && changed().hasOnly(['status', 'void', 'updatedAtMs'])
+          && postedNow(c, 'vpayx:' + id);
+      }
+
       match /dailyStats/{d}     { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
       match /stock/{i}          { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
       match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper(); }

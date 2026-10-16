@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import type { RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
+import { collection, collectionGroup, deleteDoc, doc, getDoc, getDocs, increment, query, setDoc, updateDoc, where } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -16,8 +16,12 @@ import {
   invoiceLinesFor,
   itemPhotoPlan,
   kotPlan,
+  openingBalancePlan,
   pairPlan,
   pairingRequestPlan,
+  purchaseEditPlan,
+  purchasePlan,
+  purchaseVoidPlan,
   quickPlan,
   rebillPlan,
   rejectPairingPlan,
@@ -27,9 +31,13 @@ import {
   settleTenders,
   terminalUpdatePlan,
   upsertItemPlan,
+  upsertMaterialPlan,
+  upsertVendorPlan,
+  vendorPaymentPlan,
+  vendorPaymentVoidPlan,
   zClosePlan,
 } from "@px-pos/core";
-import type { OrderLine, OrderRef, PlanCtx, ZReport } from "@px-pos/core";
+import type { OrderLine, OrderRef, PlanCtx, PurchaseInput, VendorProfile, ZReport } from "@px-pos/core";
 import { applyPlan } from "./apply-plan";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -330,5 +338,136 @@ describe("cross-client views", () => {
     await assertSucceeds(getDocs(collectionGroup(db("super"), "days")));
     await assertFails(getDocs(collectionGroup(db("adminA"), "terminals")));
     await assertFails(getDocs(collectionGroup(db("dev1"), "dailyStats")));
+  });
+});
+
+describe("vendors", () => {
+  const profile = (name = "Lakshmi Dairy"): VendorProfile => ({ name, phone: undefined, gstin: undefined, materialIds: [], creditDays: 7, note: undefined, active: true });
+  const lines = [{ lineId: "l1", materialId: "milk", name: "Milk", qtyMilli: 20000, unit: "L" as const, amountPaise: 112000, taxBps: 0 }];
+  const addVendor = (as = "dev1", ctx = termCtx()) => applyPlan(db(as), upsertVendorPlan(ctx, { id: "v1", vendor: profile() }));
+  const buy = (id: string, extra: Partial<PurchaseInput> = {}, ctx = termCtx()) => purchasePlan(ctx, { id, vendor: { id: "v1", name: "Lakshmi Dairy" }, billDate: BD, businessDate: BD, lines, ...extra });
+  const read = async (path: string) => (await getDoc(doc(db("super"), path))).data();
+  const vendorDoc = (o: Record<string, unknown>) => ({ name: "X", active: true, creditDays: 0, materialIds: [], purchasedPaise: 0, paidPaise: 0, ...o });
+
+  it("a till adds a vendor with nothing owed; it can't start with a balance", async () => {
+    await assertSucceeds(addVendor());
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendors/v2"), vendorDoc({ purchasedPaise: 500 })));
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendors/v3"), vendorDoc({ lastPostingKey: "vbill:x" })));
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendors/v4"), vendorDoc({ name: "" })));
+  });
+
+  it("a purchase counts once; a replay is rejected whole", async () => {
+    await addVendor();
+    const p = buy("p1");
+    await assertSucceeds(applyPlan(db("dev1"), p));
+    expect((await read("clients/c1/vendors/v1"))?.purchasedPaise).toBe(112000);
+    const s = await read(`clients/c1/dailyStats/${BD}`);
+    expect([s?.purchasesPaise, s?.purchaseBills, s?.purchByVendor?.v1]).toEqual([112000, 1, 112000]);
+    await assertFails(applyPlan(db("dev1"), p));
+    expect((await read("clients/c1/vendors/v1"))?.purchasedPaise).toBe(112000);
+    expect((await read(`clients/c1/dailyStats/${BD}`))?.purchasesPaise).toBe(112000);
+  });
+
+  it("profiles change freely; the totals only with a posting from the same batch", async () => {
+    await addVendor();
+    await assertSucceeds(updateDoc(doc(db("dev1"), "clients/c1/vendors/v1"), { name: "Lakshmi Milk", creditDays: 30, updatedAtMs: NOW }));
+    await assertFails(updateDoc(doc(db("dev1"), "clients/c1/vendors/v1"), { purchasedPaise: 999 }));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/vendors/v1"), { paidPaise: 999 }));
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendors/v1"), { purchasedPaise: increment(500), lastPostingKey: "vbill:nope" }, { merge: true }));
+    await applyPlan(db("dev1"), buy("p1"));
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendors/v1"), { purchasedPaise: increment(500), lastPostingKey: "vbill:p1" }, { merge: true }));
+    await assertSucceeds(updateDoc(doc(db("super"), "clients/c1/vendors/v1"), { purchasedPaise: 0, paidPaise: 0 }));
+  });
+
+  it("paid on delivery from the drawer: one batch moves bought, paid and the drawer", async () => {
+    await addVendor();
+    await assertSucceeds(applyPlan(db("dev1"), buy("p1", { paidNow: { id: "pay1", amountPaise: 112000, mode: "drawer" } })));
+    const s = await read(`clients/c1/dailyStats/${BD}`);
+    expect([s?.cash?.t1?.paidOut, s?.cash?.t1?.paidOutVendors, s?.vendorPaidPaise]).toEqual([112000, 112000, 112000]);
+    const v = await read("clients/c1/vendors/v1");
+    expect([v?.purchasedPaise, v?.paidPaise]).toEqual([112000, 112000]);
+  });
+
+  it("drawer cash leaves only the drawer of the till writing it, never from admin", async () => {
+    await addVendor();
+    const pay = (id: string, ctx: PlanCtx, mode: "drawer" | "upi" = "drawer") => vendorPaymentPlan(ctx, { id, vendor: { id: "v1", name: "Lakshmi Dairy" }, businessDate: BD, amountPaise: 50000, mode });
+    await assertFails(applyPlan(db("adminA"), pay("q1", termCtx())));
+    await assertFails(applyPlan(db("dev1"), pay("q2", termCtx("c1", "t2"))));
+    await assertSucceeds(applyPlan(db("dev1"), pay("q3", termCtx())));
+    await assertSucceeds(applyPlan(db("adminA"), pay("q4", adminCtx("adminA"), "upi")));
+    expect((await read("clients/c1/vendors/v1"))?.paidPaise).toBe(100000);
+  });
+
+  it("no purchase or payment without its own posting", async () => {
+    await addVendor();
+    const bare = { status: "active", kind: "bill", vendorId: "v1", totalPaise: 100, lines: [] };
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/purchases/p9"), bare));
+    await applyPlan(db("dev1"), buy("p1"));
+    const piggy = { status: "active", kind: "payment", vendorId: "v1", amountPaise: 100, mode: "upi", purchaseId: "p1" };
+    await assertFails(setDoc(doc(db("dev1"), "clients/c1/vendorPayments/q9"), piggy));
+  });
+
+  it("voids reverse once and can't be undone or edited", async () => {
+    await addVendor();
+    await applyPlan(db("dev1"), buy("p1", { paidNow: { id: "pay1", amountPaise: 50000, mode: "drawer" } }));
+    const ref = { id: "p1", kind: "bill" as const, vendorId: "v1", vendorName: "Lakshmi Dairy", businessDate: BD, totalPaise: 112000, gstPaise: 0, lines: lines.map((l) => ({ ...l, gstPaise: 0 })), status: "active" as const };
+    await assertFails(updateDoc(doc(db("dev1"), "clients/c1/purchases/p1"), { status: "void", void: { reason: "x", by: "s", atMs: 1 }, updatedAtMs: NOW }));
+    await assertFails(updateDoc(doc(db("dev1"), "clients/c1/purchases/p1"), { totalPaise: 1 }));
+    await assertSucceeds(applyPlan(db("dev1"), purchaseEditPlan(termCtx(), { id: "p1", vendorName: "Lakshmi Dairy" }, { billNo: "1201" })));
+    const v = purchaseVoidPlan(termCtx(), ref, "Entered twice");
+    await assertSucceeds(applyPlan(db("dev1"), v));
+    expect((await read("clients/c1/vendors/v1"))?.purchasedPaise).toBe(0);
+    expect((await read(`clients/c1/dailyStats/${BD}`))?.purchasesPaise).toBe(0);
+    await assertFails(applyPlan(db("dev1"), v));
+    await assertFails(updateDoc(doc(db("dev1"), "clients/c1/purchases/p1"), { status: "active", updatedAtMs: NOW }));
+    const pv = vendorPaymentVoidPlan(termCtx(), { id: "pay1", kind: "payment", vendorId: "v1", vendorName: "Lakshmi Dairy", businessDate: BD, amountPaise: 50000, mode: "drawer", drawerTerminalId: "t1", status: "active" }, "Wrong amount");
+    await assertSucceeds(applyPlan(db("dev1"), pv));
+    expect((await read(`clients/c1/dailyStats/${BD}`))?.cash?.t1?.paidOut).toBe(0);
+    expect((await read("clients/c1/vendors/v1"))?.paidPaise).toBe(0);
+    await assertFails(applyPlan(db("dev1"), pv));
+  });
+
+  it("an opening balance moves only the vendor", async () => {
+    await addVendor("adminA", adminCtx("adminA"));
+    await assertSucceeds(applyPlan(db("adminA"), openingBalancePlan(adminCtx("adminA"), { id: "o1", vendor: { id: "v1", name: "Lakshmi Dairy" }, asOf: "2026-09-01", amountPaise: 840000 })));
+    await assertSucceeds(applyPlan(db("adminA"), openingBalancePlan(adminCtx("adminA"), { id: "o2", vendor: { id: "v1", name: "Lakshmi Dairy" }, asOf: "2026-09-01", amountPaise: -50000 })));
+    const v = await read("clients/c1/vendors/v1");
+    expect([v?.purchasedPaise, v?.paidPaise]).toEqual([840000, 50000]);
+    expect(await read("clients/c1/dailyStats/2026-09-01")).toBeUndefined();
+  });
+
+  it("materials: anyone on the outlet adds them, the unit never changes", async () => {
+    const m = (unit: "L" | "kg", name = "Milk") => upsertMaterialPlan(termCtx(), { id: "milk", material: { name, unit, taxBps: 0, active: true } });
+    await assertSucceeds(applyPlan(db("dev1"), m("L")));
+    await assertSucceeds(updateDoc(doc(db("adminA"), "clients/c1/materials/milk"), { name: "Cow milk", updatedAtMs: NOW }));
+    await assertFails(updateDoc(doc(db("dev1"), "clients/c1/materials/milk"), { unit: "kg" }));
+    await assertFails(applyPlan(db("adminB"), m("L", "Curd")));
+  });
+
+  it("other clients' admins and revoked tills are refused", async () => {
+    await addVendor();
+    await assertFails(applyPlan(db("adminB"), buy("p1", {}, adminCtx("adminB"))));
+    await assertSucceeds(applyPlan(db("super"), revokeTerminalPlan(adminCtx("super"), { id: "t1", authUid: "dev1", name: "Counter" }, "lost")));
+    await assertFails(applyPlan(db("dev1"), buy("p2")));
+  });
+
+  it("nothing is ever deleted", async () => {
+    await addVendor();
+    await applyPlan(db("dev1"), buy("p1", { paidNow: { id: "pay1", amountPaise: 100, mode: "upi" } }));
+    await applyPlan(db("dev1"), upsertMaterialPlan(termCtx(), { id: "milk", material: { name: "Milk", unit: "L", taxBps: 0, active: true } }));
+    for (const path of ["clients/c1/vendors/v1", "clients/c1/materials/milk", "clients/c1/purchases/p1", "clients/c1/vendorPayments/pay1"]) await assertFails(deleteDoc(doc(db("super"), path)));
+  });
+
+  it("the largest vendor batch stays inside the rules budget", async () => {
+    await addVendor();
+    const big = buy("p1", {
+      lines: [...lines, { lineId: "l2", materialId: "sugar", name: "Sugar", qtyMilli: 5000, unit: "kg", amountPaise: 21000, taxBps: 500 }, { lineId: "l3", materialId: "tea", name: "Tea", qtyMilli: 1000, unit: "kg", amountPaise: 52000, taxBps: 500 }],
+      paidNow: { id: "pay1", amountPaise: 185000, mode: "drawer" },
+      newMaterials: [
+        { id: "sugar", material: { name: "Sugar", unit: "kg", taxBps: 500, active: true } },
+        { id: "tea", material: { name: "Tea", unit: "kg", taxBps: 500, active: true } },
+      ],
+    });
+    await assertSucceeds(applyPlan(db("dev1"), big));
   });
 });

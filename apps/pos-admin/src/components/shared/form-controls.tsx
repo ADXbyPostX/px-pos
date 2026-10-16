@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import { formatINR, parseINR, type Paise } from "@px-pos/core";
+import { formatINR, formatQty, parseINR, parseQty, type Paise } from "@px-pos/core";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -57,6 +57,7 @@ export function MoneyInput({
   className,
   placeholder = "0.00",
   "aria-invalid": invalid,
+  "aria-label": ariaLabel,
   autoFocus,
   onEnter,
 }: {
@@ -66,6 +67,7 @@ export function MoneyInput({
   className?: string;
   placeholder?: string;
   "aria-invalid"?: boolean;
+  "aria-label"?: string;
   autoFocus?: boolean;
   onEnter?: () => void;
 }) {
@@ -87,6 +89,7 @@ export function MoneyInput({
         value={text}
         placeholder={placeholder}
         aria-invalid={invalid}
+        aria-label={ariaLabel}
         autoFocus={autoFocus}
         onChange={(e) => {
           setText(e.target.value);
@@ -122,6 +125,35 @@ export function IntInput({ id, value, onChange, min = 0, max, className, placeho
         if (max != null) n = Math.min(n, max);
         n = Math.max(n, min);
         onChange(n);
+      }}
+      className={cn("tabular-nums", className)}
+    />
+  );
+}
+
+/** Quantity with up to 3 decimals ("1.5" kg), held as thousandths of the unit. Null while invalid. */
+export function QtyInput({ id, value, onChange, className, placeholder = "0", "aria-label": ariaLabel, autoFocus }: { id?: string; value: number | null; onChange: (milli: number | null) => void; className?: string; placeholder?: string; "aria-label"?: string; autoFocus?: boolean }) {
+  const toText = (v: number | null) => (v == null ? "" : formatQty(v));
+  const [text, setText] = useState(() => toText(value));
+  // Follow external resets — adjusted during render.
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) {
+    setSeen(value);
+    if (value !== parseQty(text)) setText(toText(value));
+  }
+  return (
+    <Input
+      id={id}
+      inputMode="decimal"
+      autoComplete="off"
+      value={text}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      autoFocus={autoFocus}
+      onChange={(e) => {
+        const t = e.target.value.replace(/[^\d.]/g, "");
+        setText(t);
+        onChange(t.trim() === "" ? null : parseQty(t));
       }}
       className={cn("tabular-nums", className)}
     />

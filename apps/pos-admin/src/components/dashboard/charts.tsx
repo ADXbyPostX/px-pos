@@ -33,15 +33,32 @@ export function TimeBars({ data, series, className }: { data: Point[]; series: S
 }
 
 /** Horizontal bars by name: board columns, workload, pipeline. One series, or several stacked. */
-export function RankedBars({ data, series, colors, className }: { data: Record<string, string | number>[]; series: Series[]; colors?: string[]; className?: string }) {
+export function RankedBars({ data, series, colors, className, format }: { data: Record<string, string | number>[]; series: Series[]; colors?: string[]; className?: string; format?: (value: number) => string }) {
   const height = Math.max(96, data.length * 30 + 16);
+  const config = toConfig(series);
   return (
-    <ChartContainer config={toConfig(series)} className={cn("aspect-auto w-full", className)} style={{ height }}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 28, left: 0, bottom: 4 }} barCategoryGap={7} maxBarSize={22}>
+    <ChartContainer config={config} className={cn("aspect-auto w-full", className)} style={{ height }}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: format ? 72 : 28, left: 0, bottom: 4 }} barCategoryGap={7} maxBarSize={22}>
         <CartesianGrid horizontal={false} stroke="var(--border)" />
         <XAxis type="number" hide allowDecimals={false} />
         <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={100} tick={{ fill: "var(--foreground)" }} />
-        <ChartTooltip cursor={{ fill: "var(--accent)" }} content={<ChartTooltipContent />} />
+        <ChartTooltip
+          cursor={{ fill: "var(--accent)" }}
+          content={
+            <ChartTooltipContent
+              formatter={
+                format
+                  ? (value, name) => (
+                      <div className="flex w-full items-center justify-between gap-3">
+                        <span className="text-muted-foreground">{config[String(name)]?.label ?? String(name)}</span>
+                        <span className="font-medium tabular-nums">{format(Number(value))}</span>
+                      </div>
+                    )
+                  : undefined
+              }
+            />
+          }
+        />
         {series.length > 1 ? <ChartLegend content={<ChartLegendContent />} /> : null}
         {series.map((s, si) => (
           <Bar
@@ -51,7 +68,7 @@ export function RankedBars({ data, series, colors, className }: { data: Record<s
             fill={s.color}
             radius={0}
             isAnimationActive={false}
-            label={si === series.length - 1 && series.length === 1 ? { position: "right", fill: "var(--muted-foreground)", fontSize: 11 } : undefined}
+            label={si === series.length - 1 && series.length === 1 ? { position: "right", fill: "var(--muted-foreground)", fontSize: 11, ...(format ? { formatter: (v: unknown) => format(Number(v)) } : {}) } : undefined}
           >
             {colors && series.length === 1 ? data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />) : null}
           </Bar>

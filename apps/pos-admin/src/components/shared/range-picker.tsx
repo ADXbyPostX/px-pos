@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarDays, CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
 import { addDays, bizDateLabel, businessDateFor, daysBetween, isBizDate, type BizDate } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -64,7 +64,7 @@ export function useBizRange(cutoffMin: number, fallback: Exclude<Preset, "custom
   return { ...value, today, days: daysBetween(value.from, value.to) + 1, previous, setPreset, setRange };
 }
 
-export function RangePicker({ range, maxDays }: { range: ReturnType<typeof useBizRange>; maxDays?: number }) {
+export function RangePicker({ range, maxDays, presets = ["today", "7", "30", "90"] }: { range: ReturnType<typeof useBizRange>; maxDays?: number; presets?: Array<Exclude<Preset, "custom">> }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<{ from?: Date; to?: Date } | undefined>(undefined);
   const label = range.from === range.to ? bizDateLabel(range.from) : `${bizDateLabel(range.from)} – ${bizDateLabel(range.to)}`;
@@ -78,11 +78,13 @@ export function RangePicker({ range, maxDays }: { range: ReturnType<typeof useBi
         onValueChange={(v) => v && range.setPreset(v as Exclude<Preset, "custom">)}
         aria-label="Date range"
       >
-        <ToggleGroupItem value="today" className="px-3">
-          Today
-        </ToggleGroupItem>
+        {presets.includes("today") ? (
+          <ToggleGroupItem value="today" className="px-3">
+            Today
+          </ToggleGroupItem>
+        ) : null}
         {(["7", "30", "90"] as const)
-          .filter((p) => !maxDays || Number(p) <= maxDays)
+          .filter((p) => presets.includes(p) && (!maxDays || Number(p) <= maxDays))
           .map((p) => (
             <ToggleGroupItem key={p} value={p} className="px-3 tabular-nums">
               {p}D
@@ -187,5 +189,33 @@ export function DateSwitch({ value }: { value: ReturnType<typeof useBizDate> }) 
         <ChevronRight aria-hidden />
       </Button>
     </div>
+  );
+}
+
+/** One business date in a form (bill date, as-of date). Dates after `max` can't be picked. */
+export function BizDateField({ id, value, onChange, max, "aria-label": ariaLabel }: { id?: string; value: BizDate; onChange: (d: BizDate) => void; max?: BizDate; "aria-label"?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button id={id} type="button" variant="outline" className="w-full justify-start font-normal tabular-nums" aria-label={ariaLabel}>
+          <CalendarDays data-icon="inline-start" aria-hidden />
+          {bizDateLabel(value, true)}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar
+          mode="single"
+          defaultMonth={toDate(value)}
+          selected={toDate(value)}
+          onSelect={(d) => {
+            if (!d) return;
+            onChange(fromDate(d));
+            setOpen(false);
+          }}
+          disabled={max ? { after: toDate(max) } : undefined}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }

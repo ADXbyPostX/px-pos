@@ -25,6 +25,10 @@ export const COL = {
   dailyStats: "dailyStats",
   stockSnapshots: "stockSnapshots",
   auditLog: "auditLog",
+  vendors: "vendors",
+  materials: "materials",
+  purchases: "purchases",
+  vendorPayments: "vendorPayments",
 } as const;
 
 export type ClientCollection = (typeof COL)[keyof typeof COL];
@@ -55,6 +59,10 @@ export const paths = {
   stockSnapshot: (cid: string, d: string) => `clients/${cid}/${COL.stockSnapshots}/${d}`,
   customer: (cid: string, phone10: string) => `clients/${cid}/${COL.customers}/${phone10}`,
   audit: (cid: string, id: string) => `clients/${cid}/${COL.auditLog}/${id}`,
+  vendor: (cid: string, id: string) => `clients/${cid}/${COL.vendors}/${id}`,
+  material: (cid: string, id: string) => `clients/${cid}/${COL.materials}/${id}`,
+  purchase: (cid: string, id: string) => `clients/${cid}/${COL.purchases}/${id}`,
+  vendorPayment: (cid: string, id: string) => `clients/${cid}/${COL.vendorPayments}/${id}`,
 } as const;
 
 /** Posting keys: the exactly-once ledger id for every stats/stock-moving batch. */
@@ -69,6 +77,11 @@ export const postingKey = {
   expenseVoid: (id: string) => `expvoid:${id}`,
   cashMove: (id: string) => `cash:${id}`,
   stockMove: (id: string) => `stk:${id}`,
+  // Vendors: these four prefixes are spelled out in firebase/firestore.rules too — keep them in step.
+  purchase: (id: string) => `vbill:${id}`,
+  purchaseVoid: (id: string) => `vbillx:${id}`,
+  vendorPay: (id: string) => `vpay:${id}`,
+  vendorPayVoid: (id: string) => `vpayx:${id}`,
 } as const;
 
 /** 10-digit Indian mobile from any input ("+91 98765-43210" → "9876543210"), or null. */

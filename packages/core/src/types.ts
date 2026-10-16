@@ -653,6 +653,115 @@ export interface CashMovement extends Meta {
   approvedBy?: string;
 }
 
+// ─── vendors (raw-material purchases) ───────────────────────────────────────
+// "Supplier" is the outlet itself on its own GST invoices; the people it buys from are Vendors.
+
+export const MATERIAL_UNITS = ["kg", "g", "L", "ml", "pcs", "pkt", "box", "dozen", "tray", "bottle", "can", "cylinder"] as const;
+export type MaterialUnit = (typeof MATERIAL_UNITS)[number];
+
+/** "drawer" = cash from this till's drawer (till only); "cash" = cash from outside the till. */
+export const VENDOR_PAY_MODES = ["drawer", "cash", "upi", "bank", "cheque", "other"] as const;
+export type VendorPayMode = (typeof VENDOR_PAY_MODES)[number];
+
+export interface Vendor extends Meta {
+  name: string;
+  phone?: string;
+  gstin?: string;
+  /** What they usually supply (materials/{id}); fills itself in from their bills too. */
+  materialIds: string[];
+  /** Days of credit: 0 = paid on delivery, 7 = weekly, 30 = monthly (overdue = oldest due bill older than this). */
+  creditDays: number;
+  note?: string;
+  active: boolean;
+  /** Σ active bills incl. an opening balance. Moved only by posted batches (rules). */
+  purchasedPaise: Paise;
+  /** Σ active payments incl. an opening advance. Moved only by posted batches. */
+  paidPaise: Paise;
+  /** Posting of the last batch that moved the totals (exactly-once guard). */
+  lastPostingKey?: string;
+  /** Approximate (last write wins across tills): for sorting only. */
+  lastPurchaseAtMs?: number;
+  lastPaymentAtMs?: number;
+}
+
+export interface Material extends Meta {
+  name: string;
+  /** Fixed once created (its history would mix kg and g otherwise). */
+  unit: MaterialUnit;
+  /** Usual GST on its bills (records only: no input tax credit at 5%). */
+  taxBps: Bps;
+  active: boolean;
+}
+
+export type PurchaseKind = "bill" | "opening";
+
+export interface PurchaseLine {
+  lineId: string;
+  materialId?: string;
+  /** Frozen at entry. */
+  name: string;
+  /** Thousandths of `unit` (1.5 kg = 1500). Integer > 0. */
+  qtyMilli: number;
+  unit: MaterialUnit;
+  /** As billed, GST included. The source of truth; rate = amount ÷ qty. */
+  amountPaise: Paise;
+  taxBps: Bps;
+  /** Backed out of amountPaise (records only). */
+  gstPaise: Paise;
+}
+
+export interface Purchase extends Meta {
+  outletId: "main";
+  vendorId: string;
+  vendorName: string;
+  kind: PurchaseKind;
+  /** Date on the vendor's bill: decides which dues are oldest (FIFO), their age and the statement. */
+  billDate: BizDate;
+  /** Business day it was entered: "Bought" in that day's stats and Z (closed days never change). */
+  businessDate: BizDate;
+  billNo?: string;
+  lines: PurchaseLine[];
+  /** Distinct line materialIds (array-contains → price history). */
+  materialIds: string[];
+  subtotalPaise: Paise;
+  /** Round off or a small discount on the bill, signed, at most ₹100 either way. */
+  adjustPaise: Paise;
+  /** Owed for this bill = subtotal + adjust; always > 0. */
+  totalPaise: Paise;
+  gstPaise: Paise;
+  status: "active" | "void";
+  void?: { reason: string; by: string; atMs: number };
+  enteredBy: string;
+  terminalId?: string;
+  /** Paid on delivery in the same batch. */
+  paymentId?: string;
+  note?: string;
+}
+
+export type VendorPaymentKind = "payment" | "opening";
+
+export interface VendorPayment extends Meta {
+  outletId: "main";
+  vendorId: string;
+  vendorName: string;
+  /** "opening" = an advance paid before the outlet used PX POS. */
+  kind: VendorPaymentKind;
+  businessDate: BizDate;
+  amountPaise: Paise;
+  mode: VendorPayMode;
+  /** mode "drawer": the till whose drawer paid (= the writing till, rules). */
+  drawerTerminalId?: string;
+  ref?: string;
+  note?: string;
+  paidBy: string;
+  approvedBy?: string;
+  /** Paid on delivery of this purchase (same batch, the purchase's posting). */
+  purchaseId?: string;
+  status: "active" | "void";
+  void?: { reason: string; by: string; atMs: number };
+  terminalId?: string;
+}
+
 // ─── day, drawers, stats ────────────────────────────────────────────────────
 
 export interface Day {
@@ -694,8 +803,14 @@ export interface CashStats {
   sales: Paise;
   refunds: Paise;
   paidIn: Paise;
+  /** Everything paid out of the drawer (expenses and vendors). */
   paidOut: Paise;
   drops: Paise;
+  /**
+   * The part of paidOut that paid vendors — a breakdown for reports, already inside paidOut, so it
+   * is never subtracted again (old tills and Z reports stay right). Missing before vendors.
+   */
+  paidOutVendors?: Paise;
 }
 
 export interface StockStats {
@@ -729,6 +844,16 @@ export interface DailyStats {
   voidByReason: Record<string, NP>;
   expensesPaise: Paise;
   expByCat: Record<string, Paise>;
+  /** Vendor bills entered this business day (GST included as billed; opening balances never count). */
+  purchasesPaise: Paise;
+  purchaseBills: number;
+  purchaseGstPaise: Paise;
+  purchByVendor: Record<string, Paise>;
+  /** Per material: quantity in thousandths of its unit, and amount. */
+  purchByMaterial: Record<string, { qty: number; paise: Paise }>;
+  /** Paid to vendors this business day, by way (VendorPayMode). */
+  vendorPaidPaise: Paise;
+  vendorPaidByMode: Record<string, Paise>;
   byMode: Record<string, NP>;
   byPay: Record<string, Paise>;
   refundsByPay: Record<string, Paise>;
@@ -761,7 +886,12 @@ export type PostingKind =
   | "stock_in"
   | "wastage"
   | "adjust"
-  | "count";
+  | "count"
+  | "purchase"
+  | "purchase_void"
+  | "vendor_pay"
+  | "vendor_pay_void"
+  | "vendor_opening";
 
 export interface Posting {
   kind: PostingKind;
@@ -801,6 +931,11 @@ export interface ZReport {
   cancelledBills: NP;
   voidItems: NP;
   expensesPaise: Paise;
+  /** Vendor lines — missing on Z reports closed before vendors existed. */
+  purchasesPaise?: Paise;
+  purchaseBills?: number;
+  vendorPaidPaise?: Paise;
+  vendorPaidByMode?: Record<string, Paise>;
   drawers: Array<{
     terminalId: string;
     floatPaise: Paise;

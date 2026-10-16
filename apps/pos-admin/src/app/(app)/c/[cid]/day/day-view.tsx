@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { collection, documentId, limit, orderBy, query } from "firebase/firestore";
+import { collection, documentId, limit, orderBy, query, where } from "firebase/firestore";
 import { CalendarCheck } from "lucide-react";
-import { bizDateLabel, businessDateFor, paths, receiptText, renderZ, zReport, type DailyStats, type Day, type Staff, type Terminal, type ZReport } from "@px-pos/core";
+import { bizDateLabel, businessDateFor, paths, receiptText, renderZ, vendorDay, zReport, type DailyStats, type Day, type Drawer, type Staff, type Terminal, type ZReport } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Loadable } from "@/components/shared/loadable";
@@ -72,6 +72,8 @@ export function DayView() {
   const lastClosed = rows.find((r) => r.status === "closed");
   const totalOf = (r: Row) => r.z?.totalPaise ?? r.stats?.totalPaise ?? 0;
   const ordersOf = (r: Row) => r.z?.orders ?? r.stats?.orders ?? 0;
+  const boughtOf = (r: Row) => r.z?.purchasesPaise ?? vendorDay(r.stats).boughtPaise;
+  const vendorPaidOf = (r: Row) => r.z?.vendorPaidPaise ?? vendorDay(r.stats).paidPaise;
 
   const columns: Column<Row>[] = [
     { key: "date", header: "Business day", sort: (r) => r.id, cell: (r) => <span className="font-medium">{bizDateLabel(r.id, true)}</span> },
@@ -84,6 +86,8 @@ export function DayView() {
     { key: "z", header: "Z", align: "right", sort: (r) => r.zNo ?? 0, cell: (r) => <span className="tabular-nums">{r.zNo ?? "—"}</span> },
     { key: "orders", header: "Orders", align: "right", sort: ordersOf, cell: (r) => <span className="tabular-nums">{ordersOf(r)}</span>, hideBelow: "md" },
     { key: "total", header: "Total billed", align: "right", sort: totalOf, cell: (r) => <Money value={totalOf(r)} /> },
+    { key: "bought", header: "Bought", align: "right", sort: boughtOf, cell: (r) => <Money value={boughtOf(r)} dimZero />, hideBelow: "lg" },
+    { key: "vendorPaid", header: "Paid to vendors", align: "right", sort: vendorPaidOf, cell: (r) => <Money value={vendorPaidOf(r)} dimZero />, hideBelow: "2xl" },
     { key: "cash", header: "Cash count", cell: (r) => <Diff z={r.z} />, hideBelow: "lg" },
     { key: "closed", header: "Closed", sort: (r) => r.closedAtMs ?? 0, cell: (r) => <span className="text-muted-foreground">{r.closedAtMs ? `${fmtDateTime(r.closedAtMs)} · ${staffName(r.closedBy)}` : "—"}</span>, hideBelow: "xl" },
     {
@@ -107,7 +111,16 @@ export function DayView() {
   ];
 
   const open = openId ? (rows.find((r) => r.id === openId) ?? null) : null;
-  const report = open ? (open.z ?? zReport({ zNo: 0, businessDate: open.id, closedAtMs: now, stats: open.stats ?? {}, drawers: [], invoiceRanges: [] })) : null;
+  // The X report of an open day shows its drawers so far (a till that took cash without a drawer record counts with no float).
+  const liveDate = open && open.status !== "closed" ? open.id : null;
+  const drawers = useCollection<Drawer>(liveDate ? `drawers:${cid}:${liveDate}` : null, (db) => query(collection(db, paths.col(cid, "drawers")), where("businessDate", "==", liveDate)));
+  const xDrawers = useMemo(() => {
+    const list = drawers.data.map((d) => ({ terminalId: d.terminalId, openingFloatPaise: d.openingFloatPaise, ...(d.status === "closed" && d.countedPaise != null ? { countedPaise: d.countedPaise } : {}) }));
+    const known = new Set(list.map((d) => d.terminalId));
+    for (const tid of Object.keys(open?.stats?.cash ?? {})) if (!known.has(tid)) list.push({ terminalId: tid, openingFloatPaise: 0 });
+    return list;
+  }, [drawers.data, open?.stats?.cash]);
+  const report = open ? (open.z ?? zReport({ zNo: 0, businessDate: open.id, closedAtMs: now, stats: open.stats ?? {}, drawers: xDrawers, invoiceRanges: [] })) : null;
 
   return (
     <>

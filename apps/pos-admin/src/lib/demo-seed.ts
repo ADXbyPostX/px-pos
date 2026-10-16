@@ -5,16 +5,21 @@ import {
   createClientPlan,
   expenseDelta,
   gstinCheckChar,
+  openingBalancePlan,
   paths,
   platformUserPlan,
   postingOps,
+  purchasePlan,
   sumDeltas,
   settleDelta,
   statsTree,
   upsertCategoryPlan,
   upsertFloorPlan,
   upsertItemPlan,
+  upsertMaterialPlan,
   upsertStaffPlan,
+  upsertVendorPlan,
+  vendorPaymentPlan,
   zReport,
   EXPENSE_CATEGORIES,
   type BizDate,
@@ -22,8 +27,10 @@ import {
   type DailyStats,
   type FoodType,
   type ItemInput,
+  type MaterialUnit,
   type OrderMode,
   type PayMode,
+  type VendorPayMode,
   type PlanCtx,
   type PlanOp,
   type StaffRole,
@@ -343,4 +350,101 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
   }
   plans.push({ label: "Demo Z counter", primaryPath: paths.client(ctx.cid), ops: [{ path: paths.client(ctx.cid), op: "update", data: { lastZNo: zNo, updatedAtMs: ctx.nowMs } }] });
   return plans;
+}
+
+// ─── vendors ────────────────────────────────────────────────────────────────
+
+/** What a tea room buys: rates in ₹ per unit, GST included. Mock values. */
+const MATERIALS: Array<{ id: string; name: string; unit: MaterialUnit; taxBps: number; rate: number }> = [
+  { id: "mat-milk", name: "Milk", unit: "L", taxBps: 0, rate: 56 },
+  { id: "mat-curd", name: "Curd", unit: "kg", taxBps: 0, rate: 90 },
+  { id: "mat-bun", name: "Bun", unit: "pcs", taxBps: 0, rate: 6 },
+  { id: "mat-bread", name: "Bread", unit: "pkt", taxBps: 0, rate: 45 },
+  { id: "mat-biscuits", name: "Biscuits", unit: "pkt", taxBps: 1800, rate: 40 },
+  { id: "mat-tea", name: "Tea powder", unit: "kg", taxBps: 500, rate: 420 },
+  { id: "mat-sugar", name: "Sugar", unit: "kg", taxBps: 500, rate: 46 },
+  { id: "mat-lpg", name: "LPG gas", unit: "cylinder", taxBps: 500, rate: 1850 },
+  { id: "mat-cups", name: "Paper cups", unit: "pkt", taxBps: 1800, rate: 120 },
+];
+
+const VENDORS: Array<{ id: string; name: string; phone: string; creditDays: number; materialIds: string[] }> = [
+  { id: "vend-dairy", name: "Lakshmi Dairy", phone: "9840012345", creditDays: 7, materialIds: ["mat-milk", "mat-curd"] },
+  { id: "vend-bakery", name: "Sri Balaji Bakery", phone: "9840023456", creditDays: 15, materialIds: ["mat-bun", "mat-bread", "mat-biscuits"] },
+  { id: "vend-gas", name: "Indane Gas Agency", phone: "9840034567", creditDays: 0, materialIds: ["mat-lpg"] },
+  { id: "vend-traders", name: "Kumar Traders", phone: "9840045678", creditDays: 30, materialIds: ["mat-tea", "mat-sugar", "mat-cups"] },
+];
+
+export const DEMO_VENDOR_ID = VENDORS[0]!.id;
+
+/**
+ * A month of vendor history ending today: milk every other day (paid weekly by UPI), bakery every
+ * third day (part payments), gas paid on delivery, a wholesaler on 30 days' credit with an opening
+ * balance. Each bill and payment is its own posted batch, entered on its own date.
+ */
+export function demoVendorPlans(ctx: PlanCtx, today: BizDate): WritePlan[] {
+  const at = (d: BizDate, hh = 10) => ({ ...ctx, nowMs: Date.parse(`${d}T${String(hh).padStart(2, "0")}:15:00+05:30`) });
+  const mat = new Map(MATERIALS.map((m) => [m.id, m]));
+  const setup: WritePlan[] = [
+    ...MATERIALS.map((m) => upsertMaterialPlan(ctx, { id: m.id, material: { name: m.name, unit: m.unit, taxBps: m.taxBps, active: true } })),
+    ...VENDORS.map((v) => upsertVendorPlan(ctx, { id: v.id, vendor: { name: v.name, phone: v.phone, gstin: undefined, materialIds: v.materialIds, creditDays: v.creditDays, note: undefined, active: true } })),
+  ];
+  const plans: WritePlan[] = [...pack(setup)];
+  const vendorRef = (id: string) => ({ id, name: VENDORS.find((v) => v.id === id)!.name });
+  plans.push(openingBalancePlan(at(addDays(today, -31)), { id: "vbill-opening-traders", vendor: vendorRef("vend-traders"), asOf: addDays(today, -31), amountPaise: 235000 }));
+
+  const paidTo: Record<string, number> = {};
+  let n = 0;
+  const bill = (vendorId: string, date: BizDate, items: Array<[string, number]>, paidNow?: VendorPayMode) => {
+    n += 1;
+    const id = `vbill-${String(n).padStart(3, "0")}`;
+    const lines = items.map(([mid, qty], k) => {
+      const m = mat.get(mid)!;
+      return { lineId: `l${k + 1}`, materialId: mid, name: m.name, qtyMilli: Math.round(qty * 1000), unit: m.unit, amountPaise: Math.round(qty * m.rate * 100), taxBps: m.taxBps };
+    });
+    const total = lines.reduce((s, l) => s + l.amountPaise, 0);
+    if (paidNow) paidTo[vendorId] = (paidTo[vendorId] ?? 0) + total;
+    plans.push(
+      purchasePlan(at(date, 9), {
+        id,
+        vendor: vendorRef(vendorId),
+        billDate: date,
+        businessDate: date,
+        billNo: `${vendorId === "vend-traders" ? "KT/" : ""}${1000 + n}`,
+        lines,
+        ...(paidNow ? { paidNow: { id: `vpay-${id}`, amountPaise: total, mode: paidNow } } : {}),
+        today,
+      }),
+    );
+  };
+  const pay = (vendorId: string, date: BizDate, amountPaise: number, mode: VendorPayMode, ref?: string) => {
+    if (amountPaise <= 0) return;
+    n += 1;
+    paidTo[vendorId] = (paidTo[vendorId] ?? 0) + amountPaise;
+    plans.push(vendorPaymentPlan(at(date, 18), { id: `vpay-${String(n).padStart(3, "0")}`, vendor: vendorRef(vendorId), businessDate: date, amountPaise, mode, ...(ref ? { ref } : {}), today }));
+  };
+
+  for (let back = 29; back >= 0; back--) {
+    const date = addDays(today, -back);
+    const rand = rng(Number(date.replace(/-/g, "")) + 7);
+    if (back % 2 === 0) bill("vend-dairy", date, [["mat-milk", 20 + Math.floor(rand() * 11)], ...(rand() < 0.4 ? [["mat-curd", 2] as [string, number]] : [])]);
+    if (back % 3 === 1) bill("vend-bakery", date, [["mat-bun", 40 + 10 * Math.floor(rand() * 5)], ["mat-bread", 4 + Math.floor(rand() * 5)], ...(rand() < 0.5 ? [["mat-biscuits", 10] as [string, number]] : [])]);
+    if (back === 24 || back === 9) bill("vend-gas", date, [["mat-lpg", 2]], "cash");
+    if (back === 27 || back === 12) bill("vend-traders", date, [["mat-tea", 5], ["mat-sugar", 25], ["mat-cups", 10]]);
+    // The dairy is paid every week for what it delivered until three days before.
+    if (back % 7 === 1) pay("vend-dairy", date, billedUntil("vend-dairy", addDays(date, -3)) - (paidTo["vend-dairy"] ?? 0), "upi", `UTR${date.replace(/-/g, "")}`);
+    if (back === 14) pay("vend-bakery", date, 100000, "cash");
+    if (back === 4) pay("vend-bakery", date, 150000, "upi");
+    if (back === 5) pay("vend-traders", date, 500000, "bank", "NEFT 4471");
+  }
+  return plans;
+
+  function billedUntil(vendorId: string, until: BizDate): number {
+    let sum = 0;
+    for (const p of plans) {
+      if (!p.postingKey?.startsWith("vbill:")) continue;
+      const doc = p.ops.find((o) => o.path.includes("/purchases/"))?.data as { vendorId?: string; billDate?: string; totalPaise?: number; kind?: string } | undefined;
+      if (doc?.vendorId === vendorId && doc.kind === "bill" && doc.billDate && doc.billDate <= until) sum += doc.totalPaise ?? 0;
+    }
+    return sum;
+  }
 }

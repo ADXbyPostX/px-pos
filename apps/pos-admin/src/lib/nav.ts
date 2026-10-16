@@ -14,6 +14,7 @@ export type NavIcon =
   | "kot"
   | "income"
   | "expenses"
+  | "vendors"
   | "day"
   | "stock"
   | "menu"
@@ -81,6 +82,16 @@ function clientGroups(c: string, role: Role): NavGroup[] {
           ],
         },
         { label: "Expenses", href: `${c}/expenses`, icon: "expenses" },
+        {
+          label: "Vendors",
+          href: `${c}/vendors`,
+          icon: "vendors",
+          children: [
+            { label: "Vendors", href: `${c}/vendors` },
+            { label: "Purchases", href: `${c}/vendors/purchases` },
+            { label: "Payments", href: `${c}/vendors/payments` },
+          ],
+        },
         { label: "End of day", href: `${c}/day`, icon: "day" },
       ],
     },

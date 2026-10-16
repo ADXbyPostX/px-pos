@@ -27,11 +27,17 @@ export type StaffAction =
   | "xReport"
   | "kds"
   | "viewMoney"
-  | "reports";
+  | "reports"
+  /** Log a delivery from a vendor (saved unpaid for cashiers). */
+  | "purchase"
+  /** The Vendors tab: dues, adding and editing vendors and materials. */
+  | "vendors"
+  /** Pay vendors (any way, incl. drawer cash) and void purchases or payments. */
+  | "vendorPay";
 
 const CAPTAIN: StaffAction[] = ["order", "kot", "transfer", "merge", "kds", "reprint"];
-const CASHIER: StaffAction[] = [...CAPTAIN, "bill", "settle", "discount", "expense", "paidOut", "cashMove", "dayOpen", "drawerClose", "xReport", "viewMoney"];
-const MANAGER: StaffAction[] = [...CASHIER, "comp", "voidAfterKot", "cancelBill", "editBill", "stockAdjust", "dayClose", "reports"];
+const CASHIER: StaffAction[] = [...CAPTAIN, "bill", "settle", "discount", "expense", "paidOut", "cashMove", "dayOpen", "drawerClose", "xReport", "viewMoney", "purchase"];
+const MANAGER: StaffAction[] = [...CASHIER, "comp", "voidAfterKot", "cancelBill", "editBill", "stockAdjust", "dayClose", "reports", "vendors", "vendorPay"];
 
 const MATRIX: Record<StaffRole, ReadonlySet<StaffAction>> = {
   owner: new Set<StaffAction>([...MANAGER]),
