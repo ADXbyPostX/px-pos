@@ -225,7 +225,10 @@ service cloud.firestore {
       match /materials/{id} {
         function validMaterial() {
           let d = request.resource.data;
-          return d.name is string && d.name.size() > 0 && d.name.size() <= 40 && d.active is bool;
+          return d.name is string && d.name.size() > 0 && d.name.size() <= 40 && d.active is bool
+            // Pieces per pack ("1 tray = 30 pcs") and the low-stock level (micro of its stock unit).
+            && (!('pack' in d) || (d.pack is int && d.pack >= 2 && d.pack <= 1000))
+            && (!('lowAt' in d) || (d.lowAt is number && d.lowAt >= 0));
         }
         allow create: if canRead(c) && validMaterial();
         // The unit is fixed once created (its price history would mix kg and g otherwise).
@@ -267,6 +270,8 @@ service cloud.firestore {
 
       match /dailyStats/{d}     { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
       match /stock/{i}          { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
+      // Raw-material stock: one doc (onHand), moved only alongside its posting.
+      match /inventory/{d}      { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
       match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper(); }
     }
 

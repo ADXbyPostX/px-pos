@@ -273,7 +273,23 @@ export interface Item extends Meta {
   available: boolean;
   active: boolean;
   rev: number;
+  /**
+   * Formula: raw materials used per one sold, per size (variant id), or under RECIPE_BASE for an
+   * item without sizes. Never together with trackStock. Missing or empty = no formula.
+   */
+  recipe?: ItemRecipe;
 }
+
+/** Formula key for an item without sizes. */
+export const RECIPE_BASE = "_";
+
+/** One raw material in a formula: millionths of the material's stock unit per one sold (80 ml of milk in L = 80 000). */
+export interface RecipeLine {
+  materialId: string;
+  qtyMicro: number;
+}
+
+export type ItemRecipe = Record<string, RecipeLine[]>;
 
 /**
  * An item's photo: a small square JPEG stored inline (base64) at itemPhotos/{itemId}, so it
@@ -691,6 +707,21 @@ export interface Material extends Meta {
   /** Usual GST on its bills (records only: no input tax credit at 5%). */
   taxBps: Bps;
   active: boolean;
+  /**
+   * Pieces in one purchase unit ("1 tray = 30 pcs"): stock, formulas and counts are then in pieces.
+   * Only for pack units; a dozen is always 12. Set or removed only while it has no stock.
+   */
+  pack?: number;
+  /** Low-stock level, millionths of its stock unit. */
+  lowAt?: number;
+}
+
+/** The outlet's raw-material stock: one live doc (inventory/onHand), moved only by posted batches. */
+export interface InventoryDoc {
+  /** On hand per material, millionths of its stock unit (may go below zero until counted). */
+  mat: Record<string, number>;
+  lastPostingKey: string;
+  updatedAtMs: number;
 }
 
 export type PurchaseKind = "bill" | "opening";
@@ -708,6 +739,8 @@ export interface PurchaseLine {
   taxBps: Bps;
   /** Backed out of amountPaise (records only). */
   gstPaise: Paise;
+  /** What this line added to raw-material stock (micro of the material's stock unit), fixed at entry. */
+  stockMicro?: number;
 }
 
 export interface Purchase extends Meta {
@@ -821,6 +854,19 @@ export interface StockStats {
   adj: number;
 }
 
+/** A raw material's day, in millionths of its stock unit. */
+export interface MaterialStats {
+  /** Bought (vendor bills) or stocked in. */
+  in: number;
+  /** Used up by sales (formulas). */
+  used: number;
+  /** Came back (voided before it was prepared). */
+  rev: number;
+  waste: number;
+  /** Adjustments and count differences (counted − book). */
+  adj: number;
+}
+
 /** Aggregated per client per business day. Maintained only by batched increments. */
 export interface DailyStats {
   businessDate: BizDate;
@@ -864,6 +910,8 @@ export interface DailyStats {
   byStaff: Record<string, { n: number; net: Paise; disc: Paise; voids: number }>;
   cash: Record<string, CashStats>;
   stock: Record<string, StockStats>;
+  /** Raw materials (formulas, bills, counts) — missing before inventory existed. */
+  mat?: Record<string, MaterialStats>;
   invoices: Record<string, { count: number; cancelled: number }>;
 }
 
@@ -891,7 +939,11 @@ export type PostingKind =
   | "purchase_void"
   | "vendor_pay"
   | "vendor_pay_void"
-  | "vendor_opening";
+  | "vendor_opening"
+  | "material_in"
+  | "material_waste"
+  | "material_adjust"
+  | "material_count";
 
 export interface Posting {
   kind: PostingKind;
@@ -900,6 +952,8 @@ export interface Posting {
   stats: StatsDelta;
   /** onHand delta per tracked item. */
   stock?: Record<string, number>;
+  /** Raw-material stock delta (millionths of each stock unit). */
+  materials?: Record<string, number>;
   staffId: string;
   approverId?: string;
   terminalId?: string;
@@ -951,6 +1005,8 @@ export interface StockSnapshot {
   businessDate: BizDate;
   items: Record<string, number>;
   counted?: Record<string, number>;
+  /** Raw materials at the close (from the ledger), millionths of each stock unit. */
+  materials?: Record<string, number>;
   createdAtMs: number;
 }
 

@@ -60,7 +60,7 @@ function order(status: OrderRef["status"], lines: OrderLine[], extra: Partial<Or
 }
 
 const postingOpsOf = (p: WritePlan) => p.ops.filter((o) => o.path.includes("/postings/"));
-const statsOpsOf = (p: WritePlan) => p.ops.filter((o) => o.path.includes("/dailyStats/") || o.path.includes("/stock/"));
+const statsOpsOf = (p: WritePlan) => p.ops.filter((o) => /\/(dailyStats|stock|inventory)\//.test(o.path));
 
 /** The exactly-once contract every stats-moving plan must honour. */
 function expectExactlyOnce(p: WritePlan) {

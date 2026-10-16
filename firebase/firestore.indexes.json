@@ -509,6 +509,36 @@
       "collectionGroup": "purchases",
       "fieldPath": "lines",
       "indexes": []
+    },
+    {
+      "collectionGroup": "dailyStats",
+      "fieldPath": "mat",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "postings",
+      "fieldPath": "materials",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "postings",
+      "fieldPath": "lines",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "stockSnapshots",
+      "fieldPath": "materials",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "inventory",
+      "fieldPath": "mat",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "items",
+      "fieldPath": "recipe",
+      "indexes": []
     }
   ]
 }

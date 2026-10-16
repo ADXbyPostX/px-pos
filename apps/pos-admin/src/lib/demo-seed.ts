@@ -2,6 +2,7 @@ import {
   addDays,
   bulkTablesPlan,
   computeBill,
+  consumption,
   createClientPlan,
   expenseDelta,
   gstinCheckChar,
@@ -10,6 +11,8 @@ import {
   platformUserPlan,
   postingOps,
   purchasePlan,
+  recipeBook,
+  RECIPE_BASE,
   sumDeltas,
   settleDelta,
   statsTree,
@@ -27,6 +30,7 @@ import {
   type DailyStats,
   type FoodType,
   type ItemInput,
+  type ItemRecipe,
   type MaterialUnit,
   type OrderMode,
   type PayMode,
@@ -52,20 +56,30 @@ export const DEMO_GSTIN = `${G14}${gstinCheckChar(G14)}`;
  * standalone tea room serves is restaurant service at 5% (GST 2.0); retail packs of tea
  * leaves are goods, also 5%. Rates are mock values — confirm the real menu with the accountant.
  */
-type SeedItem = { name: string; short?: string; food: FoodType; price?: number; variants?: Array<[string, number]>; stock?: number; lowAt?: number; gst?: number; modes?: OrderMode[] };
+/** recipe: [material id, micro per one sold for each size (or one value)] — 80 ml of milk (kept in L) = 80 000. */
+type SeedItem = { name: string; short?: string; food: FoodType; price?: number; variants?: Array<[string, number]>; stock?: number; lowAt?: number; gst?: number; modes?: OrderMode[]; recipe?: Array<[string, ...number[]]> };
+
+const ML = 1000; // micro of a litre in one millilitre
+const G = 1000; // micro of a kilogram in one gram
+const PCS = 1_000_000;
+const chaiRecipe = (milk: number[], sugar: number[], tea: number[]): Array<[string, ...number[]]> => [
+  ["mat-milk", ...milk.map((v) => v * ML)],
+  ["mat-sugar", ...sugar.map((v) => v * G)],
+  ["mat-tea", ...tea.map((v) => v * G)],
+];
 const MENU: Array<{ name: string; station: Station; items: SeedItem[] }> = [
   {
     name: "Chai",
     station: "beverage",
     items: [
-      { name: "Cutting Chai", food: "veg", price: 20 },
-      { name: "Masala Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]] },
-      { name: "Adrak Chai", short: "Ginger Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]] },
-      { name: "Elaichi Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]] },
-      { name: "Kulhad Chai", food: "veg", price: 50 },
-      { name: "Tandoori Chai", food: "veg", price: 70 },
+      { name: "Cutting Chai", food: "veg", price: 20, recipe: chaiRecipe([60], [6], [2]) },
+      { name: "Masala Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]], recipe: chaiRecipe([80, 120], [8, 12], [3, 4]) },
+      { name: "Adrak Chai", short: "Ginger Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]], recipe: chaiRecipe([80, 120], [8, 12], [3, 4]) },
+      { name: "Elaichi Chai", food: "veg", variants: [["Regular", 40], ["Large", 60]], recipe: chaiRecipe([80, 120], [8, 12], [3, 4]) },
+      { name: "Kulhad Chai", food: "veg", price: 50, recipe: chaiRecipe([100], [10], [3]) },
+      { name: "Tandoori Chai", food: "veg", price: 70, recipe: chaiRecipe([120], [12], [4]) },
       { name: "Kashmiri Kahwa", food: "veg", price: 90 },
-      { name: "Chai Kettle (serves 4)", short: "Chai Kettle", food: "veg", price: 150, modes: ["dineIn", "delivery"] },
+      { name: "Chai Kettle (serves 4)", short: "Chai Kettle", food: "veg", price: 150, modes: ["dineIn", "delivery"], recipe: chaiRecipe([400], [40], [12]) },
     ],
   },
   {
@@ -85,12 +99,12 @@ const MENU: Array<{ name: string; station: Station; items: SeedItem[] }> = [
     name: "Coffee",
     station: "beverage",
     items: [
-      { name: "Filter Coffee", food: "veg", price: 60 },
+      { name: "Filter Coffee", food: "veg", price: 60, recipe: [["mat-milk", 100 * ML], ["mat-sugar", 8 * G]] },
       { name: "Espresso", food: "veg", price: 90 },
       { name: "Americano", food: "veg", price: 120 },
-      { name: "Cappuccino", food: "veg", variants: [["Regular", 140], ["Large", 170]] },
-      { name: "Café Latte", short: "Latte", food: "veg", variants: [["Regular", 150], ["Large", 180]] },
-      { name: "Hot Chocolate", food: "veg", price: 160 },
+      { name: "Cappuccino", food: "veg", variants: [["Regular", 140], ["Large", 170]], recipe: [["mat-milk", 150 * ML, 200 * ML]] },
+      { name: "Café Latte", short: "Latte", food: "veg", variants: [["Regular", 150], ["Large", 180]], recipe: [["mat-milk", 180 * ML, 240 * ML]] },
+      { name: "Hot Chocolate", food: "veg", price: 160, recipe: [["mat-milk", 200 * ML], ["mat-sugar", 15 * G]] },
     ],
   },
   {
@@ -99,8 +113,8 @@ const MENU: Array<{ name: string; station: Station; items: SeedItem[] }> = [
     items: [
       { name: "Iced Lemon Tea", food: "veg", price: 110 },
       { name: "Peach Iced Tea", food: "veg", price: 130 },
-      { name: "Cold Coffee", food: "veg", price: 150 },
-      { name: "Masala Chaas", food: "veg", price: 60 },
+      { name: "Cold Coffee", food: "veg", price: 150, recipe: [["mat-milk", 200 * ML], ["mat-sugar", 20 * G]] },
+      { name: "Masala Chaas", food: "veg", price: 60, recipe: [["mat-curd", 100 * G]] },
       { name: "Fresh Lime Soda", food: "veg", variants: [["Sweet", 90], ["Salted", 90]] },
       { name: "Mineral Water (1 L)", short: "Water 1L", food: "veg", price: 20, stock: 48, lowAt: 12 },
     ],
@@ -109,26 +123,26 @@ const MENU: Array<{ name: string; station: Station; items: SeedItem[] }> = [
     name: "Sandwiches",
     station: "kitchen",
     items: [
-      { name: "Bombay Masala Sandwich", short: "Bombay Sandwich", food: "veg", variants: [["Plain", 90], ["Grilled", 120]] },
-      { name: "Veg Cheese Grilled", food: "veg", price: 140 },
-      { name: "Corn & Cheese Sandwich", short: "Corn Cheese", food: "veg", price: 150 },
-      { name: "Paneer Tikka Sandwich", short: "Paneer Tikka Sand", food: "veg", price: 170 },
-      { name: "Veg Club Sandwich", short: "Veg Club", food: "veg", price: 210 },
-      { name: "Egg Mayo Sandwich", short: "Egg Mayo", food: "egg", price: 130 },
-      { name: "Chicken Tikka Sandwich", short: "Chicken Tikka Sand", food: "nonveg", price: 190 },
+      { name: "Bombay Masala Sandwich", short: "Bombay Sandwich", food: "veg", variants: [["Plain", 90], ["Grilled", 120]], recipe: [["mat-bread", 3 * PCS]] },
+      { name: "Veg Cheese Grilled", food: "veg", price: 140, recipe: [["mat-bread", 2 * PCS]] },
+      { name: "Corn & Cheese Sandwich", short: "Corn Cheese", food: "veg", price: 150, recipe: [["mat-bread", 2 * PCS]] },
+      { name: "Paneer Tikka Sandwich", short: "Paneer Tikka Sand", food: "veg", price: 170, recipe: [["mat-bread", 2 * PCS]] },
+      { name: "Veg Club Sandwich", short: "Veg Club", food: "veg", price: 210, recipe: [["mat-bread", 3 * PCS]] },
+      { name: "Egg Mayo Sandwich", short: "Egg Mayo", food: "egg", price: 130, recipe: [["mat-bread", 2 * PCS]] },
+      { name: "Chicken Tikka Sandwich", short: "Chicken Tikka Sand", food: "nonveg", price: 190, recipe: [["mat-bread", 2 * PCS]] },
     ],
   },
   {
     name: "Snacks",
     station: "kitchen",
     items: [
-      { name: "Bun Maska", food: "veg", variants: [["Plain", 40], ["With Jam", 50]] },
+      { name: "Bun Maska", food: "veg", variants: [["Plain", 40], ["With Jam", 50]], recipe: [["mat-bun", PCS]] },
       { name: "Vada Pav", food: "veg", price: 30 },
       { name: "Samosa (2 pcs)", short: "Samosa", food: "veg", price: 40, stock: 40, lowAt: 10 },
       { name: "Veg Puff", food: "veg", price: 35, stock: 24, lowAt: 6 },
       { name: "Kanda Poha", food: "veg", price: 60 },
       { name: "Masala Maggi", food: "veg", variants: [["Plain", 80], ["Cheese", 100]] },
-      { name: "Chilli Cheese Toast", food: "veg", price: 120 },
+      { name: "Chilli Cheese Toast", food: "veg", price: 120, recipe: [["mat-bread", 2 * PCS]] },
       { name: "Masala Omelette", food: "egg", price: 90 },
       { name: "French Fries", food: "veg", variants: [["Salted", 110], ["Peri-Peri", 130]] },
     ],
@@ -236,6 +250,13 @@ export function demoSeedPlans(ctxFor: (cid: string) => PlanCtx, ids: () => strin
         lowAt: it.lowAt ?? 0,
         available: true,
         active: true,
+        ...(it.recipe
+          ? {
+              recipe: variants.length
+                ? Object.fromEntries(variants.map((v, k) => [v.id, it.recipe!.map(([materialId, ...q]) => ({ materialId, qtyMicro: q[k] ?? q[0]! }))]))
+                : { [RECIPE_BASE]: it.recipe.map(([materialId, ...q]) => ({ materialId, qtyMicro: q[0]! })) },
+            }
+          : {}),
       };
       plans.push(upsertItemPlan(ctx, { id: `item${String(sort).padStart(2, "0")}`, item, ...(it.stock ? { openingQty: it.stock, businessDate: today } : {}) }));
     });
@@ -275,6 +296,8 @@ export interface HistoryItem {
   categoryId: string;
   pricePaise: number;
   taxBps: number | null;
+  variants?: Array<{ id: string }>;
+  recipe?: ItemRecipe;
 }
 
 /**
@@ -287,12 +310,14 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
   const modes: OrderMode[] = ["dineIn", "quick", "delivery"];
   const pays: PayMode[] = ["cash", "upi", "card"];
   let zNo = client.lastZNo;
+  const book = recipeBook(items.map((i) => ({ id: i.id, ...(i.recipe ? { recipe: i.recipe } : {}) })));
   for (let back = days; back >= 1; back--) {
     const date = addDays(today, -back);
     const rand = rng(Number(date.replace(/-/g, "")));
     const weekend = [0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay());
     const orders = Math.floor((weekend ? 140 : 90) + rand() * 60);
     const deltas: StatsDelta[] = [];
+    const soldLines: Array<{ itemId: string; variantId?: string; qty: number }> = [];
     for (let o = 0; o < orders; o++) {
       // Tea room: mostly counter (quick), then tables, a little delivery; 1–3 items a ticket.
       const r = rand();
@@ -300,8 +325,10 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
       const n = 1 + Math.floor(rand() * 3);
       const lines = Array.from({ length: n }, (_, k) => {
         const it = items[Math.floor(rand() * items.length)]!;
-        return { lineId: `l${k}`, itemId: it.id, categoryId: it.categoryId, unitPricePaise: it.pricePaise, qty: 1 + Math.floor(rand() * 2), voidedQty: 0, taxBps: it.taxBps };
+        const variantId = it.variants?.length ? it.variants[Math.floor(rand() * it.variants.length)]!.id : undefined;
+        return { lineId: `l${k}`, itemId: it.id, variantId, categoryId: it.categoryId, unitPricePaise: it.pricePaise, qty: 1 + Math.floor(rand() * 2), voidedQty: 0, taxBps: it.taxBps };
       });
+      soldLines.push(...lines);
       const bill = computeBill({ lines, serviceChargeOptIn: false, charges: client.charges, mode, client });
       const hour = 7 + Math.floor(rand() * 15); // 07:00–21:59
       const settledAtMs = Date.parse(`${date}T${String(hour).padStart(2, "0")}:${String(Math.floor(rand() * 60)).padStart(2, "0")}:00+05:30`);
@@ -327,6 +354,9 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
       const category = TEA_ROOM_EXPENSES[Math.floor(rand() * TEA_ROOM_EXPENSES.length)]!;
       deltas.push(expenseDelta({ amountPaise: (300 + Math.floor(rand() * 2200)) * 100, category, paidVia: rand() < 0.6 ? "drawer" : "bank", drawerTerminalId: "demo-terminal" }));
     }
+    // Formulas: the day's sales use up raw materials.
+    const used = consumption(soldLines, book);
+    if (Object.keys(used).length) deltas.push({ mat: Object.fromEntries(Object.entries(used).map(([id, q]) => [id, { used: q }])) });
     const stats = sumDeltas(deltas);
     const key = `demo:${date}`;
     zNo += 1;
@@ -343,7 +373,7 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
       postingKey: key,
       primaryPath: paths.posting(ctx.cid, key),
       ops: [
-        ...postingOps(ctx, { key, kind: "settle", businessDate: date, refId: "demo-history", stats }),
+        ...postingOps(ctx, { key, kind: "settle", businessDate: date, refId: "demo-history", stats, materials: Object.fromEntries(Object.entries(used).map(([id, q]) => [id, -q])) }),
         { path: paths.day(ctx.cid, date), op: "set", data: { status: "closed", openedAtMs: Date.parse(`${date}T09:00:00+05:30`), openedBy: "staff2", closedAtMs: z.closedAtMs, closedBy: "staff2", zNo, z, updatedAtMs: ctx.nowMs } },
       ],
     });
@@ -355,16 +385,16 @@ export function demoHistoryPlans(ctx: PlanCtx, client: Client, items: HistoryIte
 // ─── vendors ────────────────────────────────────────────────────────────────
 
 /** What a tea room buys: rates in ₹ per unit, GST included. Mock values. */
-const MATERIALS: Array<{ id: string; name: string; unit: MaterialUnit; taxBps: number; rate: number }> = [
+const MATERIALS: Array<{ id: string; name: string; unit: MaterialUnit; taxBps: number; rate: number; pack?: number }> = [
   { id: "mat-milk", name: "Milk", unit: "L", taxBps: 0, rate: 56 },
   { id: "mat-curd", name: "Curd", unit: "kg", taxBps: 0, rate: 90 },
   { id: "mat-bun", name: "Bun", unit: "pcs", taxBps: 0, rate: 6 },
-  { id: "mat-bread", name: "Bread", unit: "pkt", taxBps: 0, rate: 45 },
+  { id: "mat-bread", name: "Bread", unit: "pkt", taxBps: 0, rate: 45, pack: 12 },
   { id: "mat-biscuits", name: "Biscuits", unit: "pkt", taxBps: 1800, rate: 40 },
   { id: "mat-tea", name: "Tea powder", unit: "kg", taxBps: 500, rate: 420 },
   { id: "mat-sugar", name: "Sugar", unit: "kg", taxBps: 500, rate: 46 },
   { id: "mat-lpg", name: "LPG gas", unit: "cylinder", taxBps: 500, rate: 1850 },
-  { id: "mat-cups", name: "Paper cups", unit: "pkt", taxBps: 1800, rate: 120 },
+  { id: "mat-cups", name: "Paper cups", unit: "pkt", taxBps: 1800, rate: 120, pack: 50 },
 ];
 
 const VENDORS: Array<{ id: string; name: string; phone: string; creditDays: number; materialIds: string[] }> = [
@@ -384,8 +414,9 @@ export const DEMO_VENDOR_ID = VENDORS[0]!.id;
 export function demoVendorPlans(ctx: PlanCtx, today: BizDate): WritePlan[] {
   const at = (d: BizDate, hh = 10) => ({ ...ctx, nowMs: Date.parse(`${d}T${String(hh).padStart(2, "0")}:15:00+05:30`) });
   const mat = new Map(MATERIALS.map((m) => [m.id, m]));
+  const stockUnits = Object.fromEntries(MATERIALS.map((m) => [m.id, { unit: m.unit, ...(m.pack ? { pack: m.pack } : {}) }]));
   const setup: WritePlan[] = [
-    ...MATERIALS.map((m) => upsertMaterialPlan(ctx, { id: m.id, material: { name: m.name, unit: m.unit, taxBps: m.taxBps, active: true } })),
+    ...MATERIALS.map((m) => upsertMaterialPlan(ctx, { id: m.id, material: { name: m.name, unit: m.unit, taxBps: m.taxBps, active: true, ...(m.pack ? { pack: m.pack } : {}) } })),
     ...VENDORS.map((v) => upsertVendorPlan(ctx, { id: v.id, vendor: { name: v.name, phone: v.phone, gstin: undefined, materialIds: v.materialIds, creditDays: v.creditDays, note: undefined, active: true } })),
   ];
   const plans: WritePlan[] = [...pack(setup)];
@@ -412,6 +443,7 @@ export function demoVendorPlans(ctx: PlanCtx, today: BizDate): WritePlan[] {
         billNo: `${vendorId === "vend-traders" ? "KT/" : ""}${1000 + n}`,
         lines,
         ...(paidNow ? { paidNow: { id: `vpay-${id}`, amountPaise: total, mode: paidNow } } : {}),
+        stockUnits,
         today,
       }),
     );
@@ -426,8 +458,8 @@ export function demoVendorPlans(ctx: PlanCtx, today: BizDate): WritePlan[] {
   for (let back = 29; back >= 0; back--) {
     const date = addDays(today, -back);
     const rand = rng(Number(date.replace(/-/g, "")) + 7);
-    if (back % 2 === 0) bill("vend-dairy", date, [["mat-milk", 20 + Math.floor(rand() * 11)], ...(rand() < 0.4 ? [["mat-curd", 2] as [string, number]] : [])]);
-    if (back % 3 === 1) bill("vend-bakery", date, [["mat-bun", 40 + 10 * Math.floor(rand() * 5)], ["mat-bread", 4 + Math.floor(rand() * 5)], ...(rand() < 0.5 ? [["mat-biscuits", 10] as [string, number]] : [])]);
+    if (back % 2 === 0) bill("vend-dairy", date, [["mat-milk", 26 + Math.floor(rand() * 11)], ["mat-curd", 2]]);
+    if (back % 3 === 1) bill("vend-bakery", date, [["mat-bun", 20 + 5 * Math.floor(rand() * 5)], ["mat-bread", 35 + Math.floor(rand() * 8)], ...(rand() < 0.5 ? [["mat-biscuits", 10] as [string, number]] : [])]);
     if (back === 24 || back === 9) bill("vend-gas", date, [["mat-lpg", 2]], "cash");
     if (back === 27 || back === 12) bill("vend-traders", date, [["mat-tea", 5], ["mat-sugar", 25], ["mat-cups", 10]]);
     // The dairy is paid every week for what it delivered until three days before.

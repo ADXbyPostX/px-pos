@@ -29,6 +29,7 @@ export const COL = {
   materials: "materials",
   purchases: "purchases",
   vendorPayments: "vendorPayments",
+  inventory: "inventory",
 } as const;
 
 export type ClientCollection = (typeof COL)[keyof typeof COL];
@@ -63,6 +64,8 @@ export const paths = {
   material: (cid: string, id: string) => `clients/${cid}/${COL.materials}/${id}`,
   purchase: (cid: string, id: string) => `clients/${cid}/${COL.purchases}/${id}`,
   vendorPayment: (cid: string, id: string) => `clients/${cid}/${COL.vendorPayments}/${id}`,
+  /** The outlet's raw-material stock (one doc, see InventoryDoc). */
+  inventory: (cid: string) => `clients/${cid}/${COL.inventory}/onHand`,
 } as const;
 
 /** Posting keys: the exactly-once ledger id for every stats/stock-moving batch. */
@@ -77,6 +80,8 @@ export const postingKey = {
   expenseVoid: (id: string) => `expvoid:${id}`,
   cashMove: (id: string) => `cash:${id}`,
   stockMove: (id: string) => `stk:${id}`,
+  /** Raw-material stock in / wastage / adjust / count (many materials in one posting). */
+  materialMove: (id: string) => `mstk:${id}`,
   // Vendors: these four prefixes are spelled out in firebase/firestore.rules too — keep them in step.
   purchase: (id: string) => `vbill:${id}`,
   purchaseVoid: (id: string) => `vbillx:${id}`,

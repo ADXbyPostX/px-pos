@@ -5,6 +5,7 @@ import { collection, query } from "firebase/firestore";
 import { addDays, lastRates, paths, vendorBalance, type Material, type Purchase, type Terminal, type Vendor, type VendorPayment } from "@px-pos/core";
 import { todayBiz } from "@/components/shared/range-picker";
 import { useClient } from "@/components/providers/client-provider";
+import { useInventory } from "@/hooks/use-inventory";
 import { useStaff } from "@/hooks/use-menu";
 import { useMaterials, useRecentPurchases, useVendors } from "@/hooks/use-vendors";
 import { useCollection, useNow, type WithId } from "@/lib/firebase/hooks";
@@ -32,6 +33,7 @@ export function VendorActionsProvider({ children }: { children: ReactNode }) {
   const recent = useRecentPurchases(cid, addDays(today, -RECENT_DAYS));
   const rates = useMemo(() => lastRates(recent.data), [recent.data]);
   const staff = useStaff(cid);
+  const inventory = useInventory(cid);
   const terminals = useCollection<Terminal>(`terminals:${cid}`, (db) => query(collection(db, paths.col(cid, "terminals"))));
 
   const terminalName = useMemo(() => {
@@ -106,7 +108,7 @@ export function VendorActionsProvider({ children }: { children: ReactNode }) {
       <PaymentDialog open={payFor.open} onOpenChange={(o) => setPayFor((d) => ({ ...d, open: o }))} vendorId={payFor.vendorId} vendors={vendors.data} today={today} />
       <VoidDialog target={voiding} onOpenChange={(o) => !o && setVoiding(null)} balancePaise={vendorBalance(voidVendorId ? vendors.byId.get(voidVendorId) : null)} terminalName={terminalName} />
       <EditBillDialog bill={editingBill} onOpenChange={(o) => !o && setEditingBill(null)} />
-      <MaterialDialog material={editingMaterial} onOpenChange={(o) => !o && setEditingMaterial(null)} />
+      <MaterialDialog material={editingMaterial} onOpenChange={(o) => !o && setEditingMaterial(null)} onHand={editingMaterial ? (inventory.onHand[editingMaterial.id] ?? 0) : 0} />
     </VendorActionsCtx>
   );
 }

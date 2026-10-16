@@ -1,5 +1,6 @@
 import { paths, postingKey } from "../paths";
-import { purchaseDelta, purchaseVoidDelta, sumDeltas, vendorPayDelta, vendorPayVoidDelta } from "../stats";
+import { toStockMicro } from "../inventory";
+import { purchaseDelta, purchaseMaterials, purchaseVoidDelta, sumDeltas, vendorPayDelta, vendorPayVoidDelta } from "../stats";
 import type { BizDate, Material, Paise, Purchase, Vendor, VendorPayMode, VendorPayment } from "../types";
 import { validateMaterial, validatePurchase, validateVendor, validateVendorPayment } from "../validate";
 import { purchaseTotals } from "../vendors";
@@ -103,33 +104,42 @@ export function upsertVendorPlan(ctx: PlanCtx, i: { id: string; vendor: VendorPr
   };
 }
 
-export type MaterialInput = Pick<Material, "name" | "unit" | "taxBps" | "active">;
+export type MaterialInput = Pick<Material, "name" | "unit" | "taxBps" | "active" | "pack" | "lowAt">;
 
-function materialDoc(ctx: PlanCtx, m: MaterialInput) {
-  return { ...meta(ctx), name: m.name.trim(), unit: m.unit, taxBps: m.taxBps, active: m.active };
+/** Without the empty optionals (Firestore never gets an undefined). */
+function materialFields(m: MaterialInput) {
+  return { name: m.name.trim(), unit: m.unit, taxBps: m.taxBps, active: m.active, ...(m.pack ? { pack: m.pack } : {}), ...(m.lowAt ? { lowAt: m.lowAt } : {}) };
 }
 
-/** Add a material or update it. Its unit is fixed once created. */
-export function upsertMaterialPlan(ctx: PlanCtx, i: { id: string; material: MaterialInput; before?: Material & { id: string } }): WritePlan {
-  const m = { ...i.material, name: i.material.name.trim() };
+function materialDoc(ctx: PlanCtx, m: MaterialInput) {
+  return { ...meta(ctx), ...materialFields(m) };
+}
+
+/**
+ * Add a material or update it. Its unit is fixed once created. Pieces per pack change the stock
+ * unit, so they can only be set or removed while it has no stock (`onHand`, micro; 30 → 24 is fine).
+ */
+export function upsertMaterialPlan(ctx: PlanCtx, i: { id: string; material: MaterialInput; before?: Material & { id: string }; onHand?: number }): WritePlan {
+  const m: MaterialInput = { name: i.material.name.trim(), unit: i.material.unit, taxBps: i.material.taxBps, active: i.material.active, pack: i.material.pack || undefined, lowAt: i.material.lowAt || undefined };
   const err = validateMaterial(m);
   if (err) fail(err);
   const path = paths.material(ctx.cid, i.id);
   if (!i.before) {
     return {
       label: `Add material ${m.name}`,
-      ops: [{ path, op: "set", data: materialDoc(ctx, m) }, auditOp(ctx, { action: "material.create", target: { type: "material", id: i.id, label: m.name }, after: m })],
+      ops: [{ path, op: "set", data: materialDoc(ctx, m) }, auditOp(ctx, { action: "material.create", target: { type: "material", id: i.id, label: m.name }, after: materialFields(m) })],
       primaryPath: path,
     };
   }
   if (i.before.unit !== m.unit) fail("A material's unit can't change. Add a new material instead.");
+  if (Boolean(i.before.pack) !== Boolean(m.pack) && (i.onHand ?? 0) !== 0) fail("Pieces per pack can only be set or removed while it has no stock. Count it to zero first.");
   const keys = changedKeys(i.before as unknown as Record<string, unknown>, m as unknown as Record<string, unknown>) as Array<keyof MaterialInput>;
   if (!keys.length) return { label: "No changes", ops: [], primaryPath: path };
   const data: Record<string, unknown> = { updatedAtMs: ctx.nowMs };
-  for (const k of keys) data[k] = m[k];
+  for (const k of keys) data[k] = m[k] === undefined ? del() : m[k];
   return {
     label: `Update material ${m.name}`,
-    ops: [{ path, op: "update", data }, auditOp(ctx, { action: "material.update", target: { type: "material", id: i.id, label: m.name }, before: pick(i.before as unknown as Record<string, unknown>, keys), after: pick(m as unknown as Record<string, unknown>, keys) })],
+    ops: [{ path, op: "update", data }, auditOp(ctx, { action: "material.update", target: { type: "material", id: i.id, label: m.name }, before: Object.fromEntries(keys.map((k) => [k, i.before?.[k] ?? null])), after: Object.fromEntries(keys.map((k) => [k, m[k] ?? null])) })],
     primaryPath: path,
   };
 }
@@ -151,6 +161,11 @@ export interface PurchaseInput {
   paidNow?: { id: string; amountPaise: Paise; mode: VendorPayMode; ref?: string };
   /** Materials first used on this bill, saved in the same batch. */
   newMaterials?: Array<{ id: string; material: MaterialInput }>;
+  /**
+   * How each material is stocked (its unit and pieces per pack): lines of these add to stock.
+   * New materials on this bill are known already. Without it a line adds no stock.
+   */
+  stockUnits?: Record<string, Pick<Material, "unit" | "pack">>;
   /** Today's business date, to refuse future-dated bills. */
   today?: BizDate;
 }
@@ -169,6 +184,14 @@ export function purchasePlan(ctx: PlanCtx, i: PurchaseInput): WritePlan {
     if (e) fail(e);
   }
   if (new Set((i.newMaterials ?? []).map((m) => m.id)).size !== (i.newMaterials ?? []).length) fail("Duplicate new material");
+  const unitOf = (mid: string) => i.stockUnits?.[mid] ?? i.newMaterials?.find((m) => m.id === mid)?.material;
+  for (const l of lines) {
+    const info = l.materialId ? unitOf(l.materialId) : undefined;
+    if (!info) continue;
+    const micro = toStockMicro(l.qtyMilli, l.unit, info);
+    if (micro == null) fail(`${l.name}: bought in ${l.unit}, which doesn't convert to how it's stocked`);
+    if (micro > 0) l.stockMicro = micro;
+  }
   const totals = purchaseTotals(lines, i.adjustPaise ?? 0);
   const materialIds = [...new Set(totals.lines.map((l) => l.materialId).filter((x): x is string => Boolean(x)))];
   const key = postingKey.purchase(i.id);
@@ -220,7 +243,7 @@ export function purchasePlan(ctx: PlanCtx, i: PurchaseInput): WritePlan {
   }
   for (const nm of i.newMaterials ?? []) ops.push({ path: paths.material(ctx.cid, nm.id), op: "set", data: materialDoc(ctx, nm.material) });
   const stats = sumDeltas([purchaseDelta({ kind: "bill", vendorId: i.vendor.id, totalPaise: totals.totalPaise, gstPaise: totals.gstPaise, lines: totals.lines }), paid ? vendorPayDelta(paid) : {}]);
-  ops.push(...postingOps(ctx, { key, kind: "purchase", businessDate: i.businessDate, refId: i.id, stats, extra: { vendorId: i.vendor.id, vendorDelta: { purchasedPaise: totals.totalPaise, ...(paid ? { paidPaise: paid.amountPaise } : {}) } } }));
+  ops.push(...postingOps(ctx, { key, kind: "purchase", businessDate: i.businessDate, refId: i.id, stats, materials: purchaseMaterials(totals.lines), extra: { vendorId: i.vendor.id, vendorDelta: { purchasedPaise: totals.totalPaise, ...(paid ? { paidPaise: paid.amountPaise } : {}) } } }));
   ops.push(vendorMoneyOp(ctx, i.vendor.id, key, { purchasedPaise: totals.totalPaise, ...(paid ? { paidPaise: paid.amountPaise } : {}) }, materialIds));
   if (paid) ops.push(auditOp(ctx, { action: "vendor.pay", target: { type: "vendor", id: i.vendor.id, label: i.vendor.name }, after: { amountPaise: paid.amountPaise, mode: paid.mode, purchaseId: i.id } }));
   return { label: `Purchase ${i.vendor.name}${billNo ? ` #${billNo}` : ""}`, ops, postingKey: key, primaryPath: paths.posting(ctx.cid, key) };
@@ -259,7 +282,7 @@ export function purchaseVoidPlan(ctx: PlanCtx, p: PurchaseRef, reason: string): 
     label: `Void purchase ${p.vendorName}${p.billNo ? ` #${p.billNo}` : ""}`,
     ops: [
       { path: paths.purchase(ctx.cid, p.id), op: "update", data: { status: "void", void: { reason: reason.trim(), by: ctx.actorId, atMs: ctx.nowMs }, updatedAtMs: ctx.nowMs } },
-      ...postingOps(ctx, { key, kind: "purchase_void", businessDate: p.businessDate, refId: p.id, stats: purchaseVoidDelta(p), extra: { vendorId: p.vendorId, vendorDelta: { purchasedPaise: -p.totalPaise } } }),
+      ...postingOps(ctx, { key, kind: "purchase_void", businessDate: p.businessDate, refId: p.id, stats: purchaseVoidDelta(p), materials: Object.fromEntries(Object.entries(purchaseMaterials(p.lines)).map(([id, q]) => [id, -q])), extra: { vendorId: p.vendorId, vendorDelta: { purchasedPaise: -p.totalPaise } } }),
       vendorMoneyOp(ctx, p.vendorId, key, { purchasedPaise: -p.totalPaise }),
       auditOp(ctx, { action: "purchase.void", target: { type: "purchase", id: p.id, label: p.vendorName }, before: { totalPaise: p.totalPaise, billNo: p.billNo ?? null, kind: p.kind }, reason: reason.trim() }),
     ],

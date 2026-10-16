@@ -1,6 +1,7 @@
 import { diffKot, orderWhere } from "../kot";
 import { kotDocId, formatKotNo } from "../numbering";
 import { paths, postingKey, phone10 } from "../paths";
+import type { RecipeBook } from "../inventory";
 import { cancelBillDelta, kotDelta, quickDelta, settleDelta, ticketVoidDelta, voidDelta } from "../stats";
 import type { SettleDeltaInput } from "../stats";
 import type { AppliedTender } from "../tenders";
@@ -143,6 +144,8 @@ export interface KotPlanInput {
   lines: OrderLine[];
   alloc: KotAlloc;
   tracked: ReadonlySet<string>;
+  /** Formulas (item id → recipe): the raw materials this round uses up. */
+  recipes?: RecipeBook;
   /** Items to switch off in the same batch (stockAutoOff and this send empties them). */
   autoOff?: string[];
   /** false when the client's kitchen is off (kitchenOn): the KOTs are recorded as served. */
@@ -188,11 +191,13 @@ export function kotPlan(ctx: PlanCtx, i: KotPlanInput): KotPlanResult {
 
   const first = kots[0] as BuiltKot;
   const key = postingKey.kot(first.id);
+  const variantOf = new Map(i.lines.map((l) => [l.lineId, l.variantId]));
   const delta = kotDelta(
-    kots.flatMap((k) => k.items.map((it) => ({ itemId: it.itemId, qty: it.qty }))),
+    kots.flatMap((k) => k.items.map((it) => ({ itemId: it.itemId, qty: it.qty, variantId: variantOf.get(it.lineId) }))),
     i.tracked,
+    i.recipes,
   );
-  ops.push(...postingOps(ctx, { key, kind: "kot", businessDate: o.businessDate, refId: first.id, stats: delta.stats, stock: delta.stock }));
+  ops.push(...postingOps(ctx, { key, kind: "kot", businessDate: o.businessDate, refId: first.id, stats: delta.stats, stock: delta.stock, materials: delta.materials }));
   for (const itemId of i.autoOff ?? []) ops.push({ path: paths.item(ctx.cid, itemId), op: "update", data: { available: false, updatedAtMs: ctx.nowMs } });
 
   return { label: `KOT ${kots.map((k) => k.kotNo).join(", ")} · ${where(o)}`, ops, postingKey: key, primaryPath: paths.posting(ctx.cid, key), kots, orderId: o.id };
@@ -437,6 +442,8 @@ export interface QuickPlanInput {
   applied: AppliedTender[];
   tipPaise: Paise;
   tracked: ReadonlySet<string>;
+  /** Formulas (item id → recipe): the raw materials this order uses up. */
+  recipes?: RecipeBook;
   serviceChargeOptIn?: boolean;
   customer?: OrderCustomer;
   /** false when the client's kitchen is off (kitchenOn): the KOTs are recorded as served. */
@@ -477,8 +484,9 @@ export function quickPlan(ctx: PlanCtx, i: QuickPlanInput): QuickPlanResult {
   const key = postingKey.quick(id);
   const delta = quickDelta(
     settleInputFor(ctx, o, i.bill, i.invoice.series, i.applied, i.tipPaise),
-    kots.flatMap((k) => k.items.map((it) => ({ itemId: it.itemId, qty: it.qty }))),
+    kots.flatMap((k) => k.items.map((it) => ({ itemId: it.itemId, qty: it.qty, variantId: i.lines.find((l) => l.lineId === it.lineId)?.variantId }))),
     i.tracked,
+    i.recipes,
   );
   const ops: PlanOp[] = [
     { path: paths.order(ctx.cid, id), op: "set", data: doc },
@@ -486,7 +494,7 @@ export function quickPlan(ctx: PlanCtx, i: QuickPlanInput): QuickPlanResult {
     { path: paths.invoice(ctx.cid, i.invoice.invoiceId), op: "set", data: invoiceDoc(ctx, o, { bill: i.bill, lines: i.invoiceLines, invoice: i.invoice, supplier: i.supplier, docType: i.docType, ...(i.buyer ? { buyer: i.buyer } : {}) }) },
     terminalSeqOp(ctx, i.invoice),
     ...paymentOps(ctx, o, i.invoice.invoiceId, i.applied, i.tipPaise, "payment"),
-    ...postingOps(ctx, { key, kind: "quick", businessDate: i.create.businessDate, refId: id, stats: delta.stats, stock: delta.stock }),
+    ...postingOps(ctx, { key, kind: "quick", businessDate: i.create.businessDate, refId: id, stats: delta.stats, stock: delta.stock, materials: delta.materials }),
   ];
   const c = customerOp(ctx, i.customer ?? i.create.customer);
   if (c) ops.push(c);
@@ -543,6 +551,7 @@ export interface VoidLineInput {
   approver?: { id: string; name?: string };
   alloc: KotAlloc;
   tracked: ReadonlySet<string>;
+  recipes?: RecipeBook;
   /** false when the client's kitchen is off: the cancel KOT is recorded as served. */
   kitchen?: boolean;
 }
@@ -563,8 +572,11 @@ export function voidLinePlan(ctx: PlanCtx, i: VoidLineInput): WritePlan & { kot:
     items: [{ lineId: l.lineId, itemId: l.itemId, name: l.name, qty: i.qty, ...(l.variantName ? { variantName: l.variantName } : {}) }],
   };
   const key = postingKey.lineVoid(o.id, l.lineId, n);
+  const recipe = i.recipes?.get(l.itemId);
   const delta = voidDelta({
     itemId: l.itemId,
+    ...(l.variantId ? { variantId: l.variantId } : {}),
+    ...(recipe ? { recipe } : {}),
     qty: i.qty,
     amountPaise: l.unitPricePaise * i.qty,
     reason: i.reason,
@@ -607,7 +619,7 @@ export function voidLinePlan(ctx: PlanCtx, i: VoidLineInput): WritePlan & { kot:
         reason: i.reason,
       },
     },
-    ...postingOps(ctx, { key, kind: "line_void", businessDate: o.businessDate, refId: `${o.id}:${l.lineId}`, stats: delta.stats, stock: delta.stock, ...(i.approver ? { approverId: i.approver.id } : {}) }),
+    ...postingOps(ctx, { key, kind: "line_void", businessDate: o.businessDate, refId: `${o.id}:${l.lineId}`, stats: delta.stats, stock: delta.stock, materials: delta.materials, ...(i.approver ? { approverId: i.approver.id } : {}) }),
     auditOp(ctx, {
       action: "line.void",
       target: { type: "order", id: o.id, label: o.orderNo },
@@ -628,6 +640,7 @@ export interface CancelPlanInput {
   prepared: boolean;
   approver?: { id: string; name?: string };
   tracked: ReadonlySet<string>;
+  recipes?: RecipeBook;
   /** For a settled order: the original tenders to refund (same modes). */
   refunds?: AppliedTender[];
   series?: string;
@@ -642,7 +655,7 @@ export function cancelOrderPlan(ctx: PlanCtx, i: CancelPlanInput): WritePlan {
   if (o.status === "cancelled") throw new Error("Order is already cancelled");
   const settled = o.status === "settled";
   const items = Object.values(o.lines)
-    .map((l) => ({ itemId: l.itemId, qty: Math.max(0, l.sentQty - l.voidedQty) }))
+    .map((l) => ({ itemId: l.itemId, qty: Math.max(0, l.sentQty - l.voidedQty), ...(l.variantId ? { variantId: l.variantId } : {}) }))
     .filter((x) => x.qty > 0);
   const key = postingKey.cancelBill(o.id);
   const series = i.series ?? "";
@@ -661,6 +674,7 @@ export function cancelOrderPlan(ctx: PlanCtx, i: CancelPlanInput): WritePlan {
         items,
         tracked: i.tracked,
         prepared: i.prepared,
+        ...(i.recipes ? { recipes: i.recipes } : {}),
       })
     : cancelBillDelta({
         settled: false,
@@ -671,6 +685,7 @@ export function cancelOrderPlan(ctx: PlanCtx, i: CancelPlanInput): WritePlan {
         items,
         tracked: i.tracked,
         prepared: i.prepared,
+        ...(i.recipes ? { recipes: i.recipes } : {}),
       });
   if (!bill) {
     delete delta.stats.cancelledBills;
@@ -687,7 +702,7 @@ export function cancelOrderPlan(ctx: PlanCtx, i: CancelPlanInput): WritePlan {
     });
   }
   if (settled && o.invoiceId) ops.push(...paymentOps(ctx, o, o.invoiceId, refunds, 0, "refund", "r"));
-  ops.push(...postingOps(ctx, { key, kind: "cancel_bill", businessDate: o.businessDate, refId: o.id, stats: delta.stats, stock: delta.stock, ...(i.approver ? { approverId: i.approver.id } : {}) }));
+  ops.push(...postingOps(ctx, { key, kind: "cancel_bill", businessDate: o.businessDate, refId: o.id, stats: delta.stats, stock: delta.stock, materials: delta.materials, ...(i.approver ? { approverId: i.approver.id } : {}) }));
   ops.push(
     auditOp(ctx, {
       action: settled || o.invoiceId ? "bill.cancel" : "order.cancel",

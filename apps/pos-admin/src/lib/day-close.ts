@@ -35,6 +35,7 @@ export async function closeDayFromAdmin(ctx: PlanCtx, businessDate: BizDate, cou
         drawers: fresh.filter((d) => d.exists()).map((d) => ({ ...(d.data() as Drawer), id: d.id })),
         invoices: invoices.docs.map((d) => d.data() as Invoice),
         prevSnapshot: prev.exists() ? (prev.data() as StockSnapshot).items : null,
+        prevMaterials: prev.exists() ? ((prev.data() as StockSnapshot).materials ?? null) : null,
         counts,
       },
     );

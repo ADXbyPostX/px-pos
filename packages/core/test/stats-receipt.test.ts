@@ -114,7 +114,8 @@ describe("stock deltas", () => {
     expect((back.stats.stock as Record<string, { rev: number }>).a?.rev).toBe(1);
     const waste = voidDelta({ itemId: "a", qty: 1, amountPaise: 20000, reason: "quality", prepared: true, staffId: "s1", tracked: true });
     expect(waste.stock).toEqual({});
-    expect((waste.stats.stock as Record<string, { waste: number }>).a?.waste).toBe(1);
+    // Prepared: the KOT already took it from stock, so it moves from sold to wasted (never both).
+    expect((waste.stats.stock as Record<string, unknown>).a).toEqual({ sold: -1, waste: 1 });
     expect((waste.stats.voidByReason as Record<string, { n: number }>).quality?.n).toBe(1);
   });
   it("EOD formula and ledger snapshots", () => {

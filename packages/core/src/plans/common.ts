@@ -27,6 +27,8 @@ export interface PostingInput {
   stats: StatsDelta;
   /** onHand delta per tracked item. */
   stock?: Record<string, number>;
+  /** Raw-material onHand delta (micro of each stock unit): one write to inventory/onHand. */
+  materials?: Record<string, number>;
   approverId?: string;
   extra?: Record<string, unknown>;
 }
@@ -39,6 +41,7 @@ export interface PostingInput {
 export function postingOps(ctx: PlanCtx, p: PostingInput): PlanOp[] {
   const stats = prune(p.stats);
   const stock = Object.fromEntries(Object.entries(p.stock ?? {}).filter(([, v]) => v !== 0));
+  const materials = Object.fromEntries(Object.entries(p.materials ?? {}).filter(([, v]) => v !== 0));
   const ops: PlanOp[] = [
     {
       path: paths.posting(ctx.cid, p.key),
@@ -49,6 +52,7 @@ export function postingOps(ctx: PlanCtx, p: PostingInput): PlanOp[] {
         refId: p.refId,
         stats,
         stock,
+        ...(Object.keys(materials).length ? { materials } : {}),
         staffId: ctx.actorId,
         ...(p.approverId ? { approverId: p.approverId } : {}),
         ...(ctx.terminalId ? { terminalId: ctx.terminalId } : {}),
@@ -71,6 +75,14 @@ export function postingOps(ctx: PlanCtx, p: PostingInput): PlanOp[] {
       path: paths.stock(ctx.cid, itemId),
       op: "merge",
       data: { onHand: inc(delta), lastPostingKey: p.key, updatedAtMs: ctx.nowMs },
+    });
+  }
+  // Every material in one doc: a big order is one extra write and one rules check, not one per material.
+  if (Object.keys(materials).length) {
+    ops.push({
+      path: paths.inventory(ctx.cid),
+      op: "merge",
+      data: { mat: Object.fromEntries(Object.entries(materials).map(([id, d]) => [id, inc(d)])), lastPostingKey: p.key, updatedAtMs: ctx.nowMs },
     });
   }
   return ops;

@@ -1,3 +1,4 @@
+import { consumption, recipeFor, type RecipeBook } from "./inventory";
 import { hourKey } from "./time";
 import type { AppliedTender } from "./tenders";
 import type {
@@ -7,6 +8,7 @@ import type {
   DailyStats,
   Drawer,
   Expense,
+  ItemRecipe,
   NP,
   OrderLine,
   OrderMode,
@@ -101,10 +103,32 @@ export interface StockDeltaResult {
   stats: StatsDelta;
   /** onHand delta per tracked item. */
   stock: Record<string, number>;
+  /** Raw-material onHand delta (micro of each stock unit) — formulas. */
+  materials: Record<string, number>;
 }
 
-/** Stock sold at KOT time (tracked items only). */
-export function kotDelta(items: Array<{ itemId: string; qty: number }>, tracked: ReadonlySet<string>): StockDeltaResult {
+/**
+ * Raw materials moved by sold / returned / prepared-then-voided lines:
+ * sold → used (stock down); returned → rev (stock back); prepared and voided → moved from used to
+ * waste (stock unchanged: the sale already took it).
+ */
+function materialsFor(stats: StatsDelta, used: Record<string, number>, how: "sold" | "returned" | "wasted"): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [id, q] of Object.entries(used)) {
+    if (!q) continue;
+    if (how === "sold") {
+      addInto(stats, { mat: { [id]: { used: q } } });
+      out[id] = -q;
+    } else if (how === "returned") {
+      addInto(stats, { mat: { [id]: { rev: q } } });
+      out[id] = q;
+    } else addInto(stats, { mat: { [id]: { used: -q, waste: q } } });
+  }
+  return out;
+}
+
+/** Stock sold at KOT time: tracked items, and the raw materials in their formulas. */
+export function kotDelta(items: Array<{ itemId: string; qty: number; variantId?: string }>, tracked: ReadonlySet<string>, recipes?: RecipeBook): StockDeltaResult {
   const stats: StatsDelta = {};
   const stock: Record<string, number> = {};
   for (const it of items) {
@@ -112,7 +136,8 @@ export function kotDelta(items: Array<{ itemId: string; qty: number }>, tracked:
     addInto(stats, { stock: { [it.itemId]: { sold: it.qty } } });
     stock[it.itemId] = (stock[it.itemId] ?? 0) - it.qty;
   }
-  return { stats: prune(stats), stock };
+  const materials = materialsFor(stats, consumption(items, recipes), "sold");
+  return { stats: prune(stats), stock, materials };
 }
 
 export interface SettleDeltaInput {
@@ -174,19 +199,22 @@ export function settleDelta(i: SettleDeltaInput): StatsDelta {
 }
 
 /** Quick order: KOT stock movement and settlement in one posting. */
-export function quickDelta(settle: SettleDeltaInput, kotItems: Array<{ itemId: string; qty: number }>, tracked: ReadonlySet<string>): StockDeltaResult {
-  const k = kotDelta(kotItems, tracked);
-  return { stats: prune(addInto(settleDelta(settle), k.stats)), stock: k.stock };
+export function quickDelta(settle: SettleDeltaInput, kotItems: Array<{ itemId: string; qty: number; variantId?: string }>, tracked: ReadonlySet<string>, recipes?: RecipeBook): StockDeltaResult {
+  const k = kotDelta(kotItems, tracked, recipes);
+  return { stats: prune(addInto(settleDelta(settle), k.stats)), stock: k.stock, materials: k.materials };
 }
 
 export interface VoidDeltaInput {
   itemId: string;
+  variantId?: string;
   qty: number;
   amountPaise: Paise;
   reason: string;
   prepared: boolean;
   staffId: string;
   tracked: boolean;
+  /** The item's formula, if it has one. */
+  recipe?: ItemRecipe;
 }
 
 /** A whole ticket voided before anything was sent or paid: counted as voids, no sales, no stock. */
@@ -207,10 +235,14 @@ export function voidDelta(v: VoidDeltaInput): StockDeltaResult {
   };
   const stock: Record<string, number> = {};
   if (v.tracked && v.qty > 0) {
-    addInto(stats, { stock: { [v.itemId]: v.prepared ? { waste: v.qty } : { rev: v.qty } } });
+    // Prepared: the sale already took it from stock — it moves from sold to wasted.
+    addInto(stats, { stock: { [v.itemId]: v.prepared ? { sold: -v.qty, waste: v.qty } : { rev: v.qty } } });
     if (!v.prepared) stock[v.itemId] = v.qty;
   }
-  return { stats: prune(stats), stock };
+  const used: Record<string, number> = {};
+  if (v.qty > 0) for (const r of recipeFor(v.recipe, v.variantId)) used[r.materialId] = (used[r.materialId] ?? 0) + r.qtyMicro * v.qty;
+  const materials = materialsFor(stats, used, v.prepared ? "wasted" : "returned");
+  return { stats: prune(stats), stock, materials };
 }
 
 export interface CancelBillDeltaInput {
@@ -222,9 +254,10 @@ export interface CancelBillDeltaInput {
   refunds: Array<{ mode: PayMode; amountPaise: Paise }>;
   cancellingTerminalId: string;
   /** Active qty per item on the order, for stock return/waste. */
-  items: Array<{ itemId: string; qty: number }>;
+  items: Array<{ itemId: string; qty: number; variantId?: string }>;
   tracked: ReadonlySet<string>;
   prepared: boolean;
+  recipes?: RecipeBook;
 }
 
 /**
@@ -252,10 +285,12 @@ export function cancelBillDelta(c: CancelBillDeltaInput): StockDeltaResult {
   const stock: Record<string, number> = {};
   for (const it of c.items) {
     if (!c.tracked.has(it.itemId) || it.qty <= 0) continue;
-    addInto(stats, { stock: { [it.itemId]: c.prepared ? { waste: it.qty } : { rev: it.qty } } });
+    // Prepared: the sale already took it from stock — it moves from sold to wasted.
+    addInto(stats, { stock: { [it.itemId]: c.prepared ? { sold: -it.qty, waste: it.qty } : { rev: it.qty } } });
     if (!c.prepared) stock[it.itemId] = (stock[it.itemId] ?? 0) + it.qty;
   }
-  return { stats: prune(stats), stock };
+  const materials = materialsFor(stats, consumption(c.items, c.recipes), c.prepared ? "wasted" : "returned");
+  return { stats: prune(stats), stock, materials };
 }
 
 export function expenseDelta(e: Pick<Expense, "amountPaise" | "category" | "paidVia" | "drawerTerminalId">): StatsDelta {
@@ -281,8 +316,16 @@ export function purchaseDelta(p: Pick<Purchase, "kind" | "vendorId" | "totalPais
   for (const l of p.lines) {
     if (!l.materialId) continue;
     addInto(d, { purchByMaterial: { [l.materialId]: { qty: l.qtyMilli, paise: l.amountPaise } } });
+    if (l.stockMicro) addInto(d, { mat: { [l.materialId]: { in: l.stockMicro } } });
   }
   return prune(d);
+}
+
+/** What a bill adds to raw-material stock (each line's stockMicro, set when it was entered). */
+export function purchaseMaterials(lines: Purchase["lines"]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const l of lines) if (l.materialId && l.stockMicro) out[l.materialId] = (out[l.materialId] ?? 0) + l.stockMicro;
+  return out;
 }
 
 export function purchaseVoidDelta(p: Pick<Purchase, "kind" | "vendorId" | "totalPaise" | "gstPaise" | "lines">): StatsDelta {
@@ -305,9 +348,25 @@ export type StockMoveKind = "in" | "waste" | "adjust";
 
 /** Manual stock movement. `qty` is positive for in/waste; signed for adjust. */
 export function stockMoveDelta(kind: StockMoveKind, itemId: string, qty: number): StockDeltaResult {
-  if (kind === "in") return { stats: { stock: { [itemId]: { in: qty } } }, stock: { [itemId]: qty } };
-  if (kind === "waste") return { stats: { stock: { [itemId]: { waste: qty } } }, stock: { [itemId]: -qty } };
-  return { stats: prune({ stock: { [itemId]: { adj: qty } } }), stock: qty ? { [itemId]: qty } : {} };
+  if (kind === "in") return { stats: { stock: { [itemId]: { in: qty } } }, stock: { [itemId]: qty }, materials: {} };
+  if (kind === "waste") return { stats: { stock: { [itemId]: { waste: qty } } }, stock: { [itemId]: -qty }, materials: {} };
+  return { stats: prune({ stock: { [itemId]: { adj: qty } } }), stock: qty ? { [itemId]: qty } : {}, materials: {} };
+}
+
+/**
+ * Raw materials stocked in, wasted or adjusted by hand (micro of each stock unit). `qty` is
+ * positive for in/waste and signed for adjust (a count is an adjust of counted − book).
+ */
+export function materialMoveDelta(kind: StockMoveKind, lines: Array<{ materialId: string; qty: number }>): { stats: StatsDelta; materials: Record<string, number> } {
+  const stats: StatsDelta = {};
+  const materials: Record<string, number> = {};
+  for (const l of lines) {
+    if (!l.qty) continue;
+    const field = kind === "in" ? "in" : kind === "waste" ? "waste" : "adj";
+    addInto(stats, { mat: { [l.materialId]: { [field]: l.qty } } });
+    materials[l.materialId] = (materials[l.materialId] ?? 0) + (kind === "waste" ? -l.qty : l.qty);
+  }
+  return { stats: prune(stats), materials };
 }
 
 // ─── reading stored stats ───────────────────────────────────────────────────

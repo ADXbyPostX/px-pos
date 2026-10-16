@@ -1,5 +1,6 @@
 import { paths, postingKey } from "../paths";
 import { cashMoveDelta, cashStats, expectedCashFor, expenseDelta, expenseVoidDelta, stockMoveDelta, zReport } from "../stats";
+import { snapshotMaterials } from "../inventory";
 import { snapshotFromLedger } from "../stock";
 import type { BizDate, CashMoveKind, DailyStats, Day, Drawer, Expense, ExpenseCategory, Invoice, Paise, PaidVia, PostingKind, ZReport } from "../types";
 import { auditOp, meta, postingOps } from "./common";
@@ -215,6 +216,8 @@ export function zClosePlan(
     z: ZReport;
     snapshot: Record<string, number>;
     counted?: Record<string, number>;
+    /** Raw materials at the close (from the ledger). */
+    materials?: Record<string, number>;
     approver?: { id: string; name?: string };
     /** The day's record was missing (e.g. wiped with test data): write when and by whom it counts as opened. */
     opened?: { atMs: number; by: string };
@@ -239,7 +242,7 @@ export function zClosePlan(
         },
       },
       { path: paths.client(ctx.cid), op: "update", data: { lastZNo: i.zNo, updatedAtMs: ctx.nowMs } },
-      { path: paths.stockSnapshot(ctx.cid, i.businessDate), op: "set", data: { businessDate: i.businessDate, items: i.snapshot, ...(i.counted ? { counted: i.counted } : {}), createdAtMs: ctx.nowMs } },
+      { path: paths.stockSnapshot(ctx.cid, i.businessDate), op: "set", data: { businessDate: i.businessDate, items: i.snapshot, ...(i.counted ? { counted: i.counted } : {}), ...(i.materials ? { materials: i.materials } : {}), createdAtMs: ctx.nowMs } },
       auditOp(ctx, { action: "day.close", target: { type: "day", id: i.businessDate }, after: { zNo: i.zNo, totalPaise: i.z.totalPaise }, ...(i.approver ? { approver: i.approver } : {}) }),
     ],
     primaryPath: path,
@@ -271,6 +274,8 @@ export interface CloseDayInput {
   invoices: Array<Pick<Invoice, "series" | "seq" | "invoiceNo" | "status">>;
   /** The previous business day's stock snapshot, if it was closed. */
   prevSnapshot: Record<string, number> | null;
+  /** The previous business day's raw-material snapshot (StockSnapshot.materials), if any. */
+  prevMaterials?: Record<string, number> | null;
   /** Cash counted per terminal for drawers still open. A drawer without a count closes as "not counted" (admin). */
   counts: Record<string, { countedPaise?: Paise; note?: string }>;
   approver?: { id: string; name?: string };
@@ -335,6 +340,7 @@ export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan;
     zNo,
     z,
     snapshot: snapshotFromLedger(i.prevSnapshot ?? {}, stats.stock),
+    ...(i.prevMaterials || stats.mat ? { materials: snapshotMaterials(i.prevMaterials ?? {}, stats.mat) } : {}),
     ...(i.approver ? { approver: i.approver } : {}),
     // No day record (wiped while the till kept the day open): it counts as opened at that day's start.
     ...(i.day ? {} : { opened: { atMs: Date.parse(`${i.businessDate}T00:00:00+05:30`), by: ctx.actorId } }),

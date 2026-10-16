@@ -103,8 +103,8 @@ function clientGroups(c: string, role: Role): NavGroup[] {
           href: `${c}/stock`,
           icon: "stock",
           children: [
-            { label: "Live", href: `${c}/stock` },
-            { label: "End of day", href: `${c}/stock/eod` },
+            { label: "Stock", href: `${c}/stock` },
+            { label: "Usage", href: `${c}/stock/usage` },
             { label: "Ledger", href: `${c}/stock/ledger` },
           ],
         },

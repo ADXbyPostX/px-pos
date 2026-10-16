@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, FileUp, ImageUp, Pencil, Plus, UtensilsCrossed } from "lucide-react";
-import { itemFlagPlan, MODE_LABEL, rateLabel, reorderPlan, stockLevel, upsertItemPlan, type Item, type Paise } from "@px-pos/core";
+import { addDays, hasRecipe, itemFlagPlan, lastRates, MODE_LABEL, rateLabel, recipeCost, recipeFor, reorderPlan, stockLevel, upsertItemPlan, type Item, type Paise } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -19,6 +19,9 @@ import { Flag } from "@/components/shared/status-badge";
 import { useClient } from "@/components/providers/client-provider";
 import { usePrincipal } from "@/components/providers/principal-provider";
 import { useCategories, useItemPhotos, useItems, useStock } from "@/hooks/use-menu";
+import { useMaterials, useRecentPurchases } from "@/hooks/use-vendors";
+import { todayBiz } from "@/components/shared/range-picker";
+import { rs } from "@/components/vendors/vendor-status";
 import type { WithId } from "@/lib/firebase/hooks";
 import { useRunPlan } from "@/lib/run-plan";
 import { cn } from "@/lib/utils";
@@ -92,6 +95,14 @@ export function MenuView() {
   const items = useItems(cid);
   const stock = useStock(cid);
   const photos = useItemPhotos(cid);
+  // Raw materials and the last price paid for each: formulas and their cost per serving.
+  const materials = useMaterials(cid);
+  const recent = useRecentPurchases(cid, addDays(todayBiz(client.day.cutoffMin), -120));
+  const rates = useMemo(() => lastRates(recent.data), [recent.data]);
+  const formulaCost = (i: Row) => {
+    const c = recipeCost(recipeFor(i.recipe, i.variants[0]?.id), materials.byId, rates);
+    return c.missing.length ? null : c.costPaise;
+  };
   const [cat, setCat] = useState<string>("all");
   const [q, setQ] = useState("");
   const [food, setFood] = useState<"all" | "veg" | "nonveg">("all");
@@ -160,8 +171,12 @@ export function MenuView() {
       key: "stock",
       header: "Stock",
       align: "right",
-      sort: (i) => (i.trackStock ? (stock.map.get(i.id) ?? 0) : -1e9),
+      sort: (i) => (i.trackStock ? (stock.map.get(i.id) ?? 0) : hasRecipe(i) ? -1e8 : -1e9),
       cell: (i) => {
+        if (hasRecipe(i)) {
+          const cost = formulaCost(i);
+          return <span className="text-xs text-muted-foreground tabular-nums">Formula{cost != null ? ` · ${rs(cost)}` : ""}</span>;
+        }
         if (!i.trackStock) return <span className="text-xs text-muted-foreground">Not tracked</span>;
         const onHand = stock.map.get(i.id) ?? 0;
         const level = stockLevel(onHand, i.lowAt);
@@ -321,6 +336,8 @@ export function MenuView() {
         categories={categories.data}
         defaultCategoryId={cat !== "all" ? cat : (categories.data[0]?.id ?? "")}
         nextSort={(items.data.at(-1)?.sort ?? 0) + 1}
+        materials={materials.data}
+        rates={rates}
       />
       <PhotosDialog open={photosOpen} onOpenChange={setPhotosOpen} items={items.data} photos={photos.map} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} categories={categories.data} items={items.data} />

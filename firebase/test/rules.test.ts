@@ -16,6 +16,7 @@ import {
   invoiceLinesFor,
   itemPhotoPlan,
   kotPlan,
+  materialMovePlan,
   openingBalancePlan,
   pairPlan,
   pairingRequestPlan,
@@ -37,7 +38,7 @@ import {
   vendorPaymentVoidPlan,
   zClosePlan,
 } from "@px-pos/core";
-import type { OrderLine, OrderRef, PlanCtx, PurchaseInput, VendorProfile, ZReport } from "@px-pos/core";
+import type { ItemRecipe, OrderLine, OrderRef, PlanCtx, PurchaseInput, VendorProfile, ZReport } from "@px-pos/core";
 import { applyPlan } from "./apply-plan";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -469,5 +470,99 @@ describe("vendors", () => {
       ],
     });
     await assertSucceeds(applyPlan(db("dev1"), big));
+  });
+});
+
+describe("inventory (raw materials)", () => {
+  const read = async (path: string) => (await getDoc(doc(db("super"), path))).data();
+  const INV = "clients/c1/inventory/onHand";
+  const chai: ItemRecipe = { lg: [{ materialId: "milk", qtyMicro: 120_000 }, { materialId: "sugar", qtyMicro: 12_000 }] };
+  const recipes = new Map([["chai", chai]]);
+  const send = (id: string, kotNo: number) =>
+    kotPlan(termCtx(), {
+      order: { create: { id, orderNo: `1-0${kotNo}`, mode: "dineIn", businessDate: BD, tableId: "tab1", tableLabel: "T1" } },
+      lines: [line("a", "chai", 2, { variantId: "lg", station: "beverage" })],
+      alloc: { numbers: [kotNo], terminalCode: "1" },
+      tracked,
+      recipes,
+    });
+
+  it("a sale with a formula moves stock once; a replay is rejected whole", async () => {
+    const p = send("o1", 40);
+    await assertSucceeds(applyPlan(db("dev1"), p));
+    expect((await read(INV))?.mat).toEqual({ milk: -240_000, sugar: -24_000 });
+    expect((await read(`clients/c1/dailyStats/${BD}`))?.mat?.milk?.used).toBe(240_000);
+    await assertFails(applyPlan(db("dev1"), p));
+    expect((await read(INV))?.mat?.milk).toBe(-240_000);
+  });
+
+  it("stock moves only alongside its own posting", async () => {
+    await assertFails(setDoc(doc(db("dev1"), INV), { mat: { milk: increment(1_000_000) }, lastPostingKey: "mstk:nope", updatedAtMs: NOW }, { merge: true }));
+    await assertFails(setDoc(doc(db("adminA"), INV), { mat: { milk: increment(1_000_000) } }, { merge: true }));
+    await applyPlan(db("dev1"), send("o1", 40));
+    await assertFails(setDoc(doc(db("dev1"), INV), { mat: { milk: increment(1_000_000) }, lastPostingKey: "kot:o1-1-40" }, { merge: true }));
+    await assertSucceeds(setDoc(doc(db("super"), INV), { mat: { milk: 0 } }, { merge: true }));
+  });
+
+  it("a bill adds stock; voiding it takes the same back", async () => {
+    const units = { milk: { unit: "L" as const }, eggs: { unit: "tray" as const, pack: 30 } };
+    await applyPlan(db("dev1"), upsertVendorPlan(termCtx(), { id: "v1", vendor: { name: "Dairy", phone: undefined, gstin: undefined, materialIds: [], creditDays: 7, note: undefined, active: true } }));
+    const b = purchasePlan(adminCtx("adminA"), {
+      id: "b1",
+      vendor: { id: "v1", name: "Dairy" },
+      billDate: BD,
+      businessDate: BD,
+      lines: [
+        { lineId: "l1", materialId: "milk", name: "Milk", qtyMilli: 20_000, unit: "L", amountPaise: 112_000, taxBps: 0 },
+        { lineId: "l2", materialId: "eggs", name: "Eggs", qtyMilli: 2_000, unit: "tray", amountPaise: 36_000, taxBps: 0 },
+      ],
+      stockUnits: units,
+    });
+    await assertSucceeds(applyPlan(db("adminA"), b));
+    expect((await read(INV))?.mat).toEqual({ milk: 20_000_000, eggs: 60_000_000 });
+    const doc1 = await read("clients/c1/purchases/b1");
+    await assertSucceeds(applyPlan(db("adminA"), purchaseVoidPlan(adminCtx("adminA"), { ...(doc1 as Parameters<typeof purchaseVoidPlan>[1]), id: "b1" }, "Entered twice")));
+    expect((await read(INV))?.mat).toEqual({ milk: 0, eggs: 0 });
+  });
+
+  it("a count from the till lands once; another client's admin can't move this stock", async () => {
+    const count = materialMovePlan(termCtx(), { id: "c1", businessDate: BD, kind: "count", lines: [{ materialId: "milk", name: "Milk", qty: 4_000_000, book: 5_000_000 }] });
+    await assertSucceeds(applyPlan(db("dev1"), count));
+    await assertFails(applyPlan(db("dev1"), count));
+    expect((await read(INV))?.mat?.milk).toBe(-1_000_000);
+    const theirs = materialMovePlan(adminCtx("adminB"), { id: "w1", businessDate: BD, kind: "waste", lines: [{ materialId: "milk", name: "Milk", qty: 1 }], reason: "x" });
+    await assertFails(applyPlan(db("adminB"), theirs));
+  });
+
+  it("pieces per pack must be 2–1000; the unit still can't change", async () => {
+    const m = (pack: number) => upsertMaterialPlan(adminCtx("adminA"), { id: "eggs", material: { name: "Eggs", unit: "tray", taxBps: 0, active: true, pack } });
+    await assertSucceeds(applyPlan(db("adminA"), m(30)));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/materials/eggs"), { pack: 1 }));
+    await assertFails(updateDoc(doc(db("adminA"), "clients/c1/materials/eggs"), { pack: 2.5 }));
+    await assertSucceeds(updateDoc(doc(db("adminA"), "clients/c1/materials/eggs"), { pack: 24, lowAt: 30_000_000 }));
+  });
+
+  it("a quick order using 25 materials stays inside the rules budget", async () => {
+    const big: ItemRecipe = { _: Array.from({ length: 25 }, (_, k) => ({ materialId: `m${k}`, qtyMicro: 1000 + k })) };
+    const lines = [line("a", "thali", 2)];
+    const bill = billFor(lines);
+    const t = settleTenders(bill.grandTotalPaise, 0, [{ mode: "cash", amountPaise: bill.grandTotalPaise }]);
+    if (!t.ok) throw new Error("tender");
+    const p = quickPlan(termCtx(), {
+      create: { id: "q25", orderNo: "1-025", mode: "quick", businessDate: BD, token: 25 },
+      lines,
+      alloc: { numbers: [25], terminalCode: "1" },
+      bill,
+      invoiceLines: invoiceLinesFor(lines, bill),
+      invoice: inv(1),
+      supplier,
+      docType: "tax_invoice",
+      applied: t.applied,
+      tipPaise: 0,
+      tracked,
+      recipes: new Map([["thali", big]]),
+    });
+    await assertSucceeds(applyPlan(db("dev1"), p));
+    expect(Object.keys((await read(INV))?.mat ?? {})).toHaveLength(25);
   });
 });

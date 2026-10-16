@@ -1,3 +1,4 @@
+import { canHavePack, validateRecipe } from "./inventory";
 import { validateReceiptLogo } from "./logo";
 import { isValidInvoicePrefix } from "./numbering";
 import { phone10 } from "./paths";
@@ -122,6 +123,8 @@ export function validateItem(i: Partial<Item>): string | null {
   const names = (i.variants ?? []).map((v) => v.name.trim().toLowerCase());
   if (new Set(names).size !== names.length) return "Variant names must be unique";
   if (i.lowAt != null && (!Number.isInteger(i.lowAt) || i.lowAt < 0)) return "Low-stock level must be 0 or more";
+  const recipeErr = validateRecipe(i.recipe, i.variants ?? [], i.trackStock);
+  if (recipeErr) return recipeErr;
   if (i.code && !/^[A-Za-z0-9-]{1,10}$/.test(i.code)) return "Short code: letters, digits or dashes, max 10";
   return null;
 }
@@ -194,10 +197,15 @@ export function validateVendor(v: Partial<Pick<Vendor, "name" | "phone" | "gstin
   return null;
 }
 
-export function validateMaterial(m: Partial<Pick<Material, "name" | "unit" | "taxBps">>): string | null {
+export function validateMaterial(m: Partial<Pick<Material, "name" | "unit" | "taxBps" | "pack" | "lowAt">>): string | null {
   if (!nonEmpty(m.name, 40)) return "Material name is required (max 40 characters)";
   if (!m.unit || !(MATERIAL_UNITS as readonly string[]).includes(m.unit)) return "Pick a unit";
   if (m.taxBps == null || !(TAX_RATES as readonly number[]).includes(m.taxBps)) return "Pick a GST rate";
+  if (m.pack != null) {
+    if (!canHavePack(m.unit)) return "Only packs (packet, box, tray, bottle, can, cylinder) have pieces per pack";
+    if (!Number.isInteger(m.pack) || m.pack < 2 || m.pack > 1000) return "Pieces per pack: 2 to 1000";
+  }
+  if (m.lowAt != null && (!Number.isSafeInteger(m.lowAt) || m.lowAt < 0)) return "Low stock level must be 0 or more";
   return null;
 }
 

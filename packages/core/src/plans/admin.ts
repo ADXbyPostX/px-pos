@@ -1,3 +1,4 @@
+import { hasRecipe } from "../inventory";
 import type { PhotoInput } from "../menu-photos";
 import { paths, postingKey } from "../paths";
 import { adminStaffId } from "../pin";
@@ -150,8 +151,15 @@ export function upsertItemPlan(
   const path = paths.item(ctx.cid, i.id);
   const ops: PlanOp[] = [];
   let key: string | undefined;
+  // Formulas are only touched when the caller passes `recipe` (the item sheet does; a price edit or
+  // a menu import doesn't). An empty formula is no formula: removed, never stored as {}.
+  const touchesRecipe = "recipe" in i.item;
+  const recipe = hasRecipe(i.item) ? i.item.recipe : undefined;
+  const item = { ...i.item } as ItemInput;
+  if (recipe) item.recipe = recipe;
+  else delete (item as Partial<ItemInput>).recipe;
   if (!i.before) {
-    ops.push({ path, op: "set", data: { ...meta(ctx), ...i.item, rev: 1 } });
+    ops.push({ path, op: "set", data: { ...meta(ctx), ...item, rev: 1 } });
     ops.push(auditOp(ctx, { action: "item.create", target: { type: "item", id: i.id, label: i.item.name }, after: { pricePaise: i.item.pricePaise, taxBps: i.item.taxBps } }));
     if (i.item.trackStock && i.openingQty && i.openingQty > 0 && i.businessDate) {
       key = postingKey.stockMove(`open-${i.id}`);
@@ -159,17 +167,20 @@ export function upsertItemPlan(
       ops.push(...postingOps(ctx, { key, kind: "stock_in", businessDate: i.businessDate, refId: i.id, stats: d.stats, stock: d.stock, extra: { itemId: i.id, reason: "opening stock" } }));
     }
   } else {
-    const keys = changedKeys(i.before as unknown as Record<string, unknown>, i.item as unknown as Record<string, unknown>);
+    const after = { ...item, ...(touchesRecipe ? { recipe } : {}) } as unknown as Record<string, unknown>;
+    const before = { ...i.before, recipe: hasRecipe(i.before) ? i.before.recipe : undefined } as unknown as Record<string, unknown>;
+    const keys = changedKeys(before, after);
     if (keys.length === 0) return { label: "No changes", ops: [], primaryPath: path };
     const data: Record<string, unknown> = { updatedAtMs: ctx.nowMs, rev: inc(1) };
-    for (const k of keys) data[k as string] = (i.item as unknown as Record<string, unknown>)[k as string];
+    for (const k of keys) data[k as string] = after[k as string] === undefined ? del() : after[k as string];
     ops.push({ path, op: "update", data });
+    const nulls = (o: Partial<Record<string, unknown>>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v ?? null]));
     ops.push(
       auditOp(ctx, {
-        action: keys.includes("pricePaise") || keys.includes("variants") ? "item.price" : "item.update",
+        action: keys.includes("pricePaise") || keys.includes("variants") ? "item.price" : keys.includes("recipe") ? "item.recipe" : "item.update",
         target: { type: "item", id: i.id, label: i.item.name },
-        before: pick(i.before as unknown as Record<string, unknown>, keys as string[]),
-        after: pick(i.item as unknown as Record<string, unknown>, keys as string[]),
+        before: nulls(pick(before, keys as string[])),
+        after: nulls(pick(after, keys as string[])),
       }),
     );
   }

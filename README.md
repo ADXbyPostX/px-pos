@@ -4,7 +4,7 @@ PostX point of sale for restaurants and cafés, on one Firebase backend (`postx-
 
 | Part | What it is | Where it runs |
 |---|---|---|
-| **pos-admin** (`apps/pos-admin`) | Back office: clients, menu, staff, terminals, settings, orders, vendors, end of day | [px-pos.vercel.app](https://px-pos.vercel.app) (Next.js 16) |
+| **pos-admin** (`apps/pos-admin`) | Back office: clients, menu, staff, terminals, settings, orders, vendors, stock, end of day | [px-pos.vercel.app](https://px-pos.vercel.app) (Next.js 16) |
 | **pos-app** (`apps/pos-app`) | The till: orders, KOTs, payments, printing, cash drawer, customer display, works offline | Android POS terminals and phones (Expo dev build, APK) |
 | **@px-pos/core** (`packages/core`) | Shared bill maths, receipts, numbering and write plans | Used by both apps |
 | **firebase/** | Firestore rules, indexes and rules tests | Firebase project `postx-pos` |
@@ -13,9 +13,9 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.0.2**, **admin v1.1.0**.
+Current version: **till v1.0.2**, **admin v1.2.0**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.1.0"). It comes from `apps/pos-admin/package.json`.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.2.0"). It comes from `apps/pos-admin/package.json`.
 - **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.0.2 → 10002.
 
 ### Releasing a new version
@@ -46,6 +46,22 @@ Release builds are signed with the PX POS **upload key**: `apps/pos-app/credenti
 `apps/pos-admin/.env.local` and the app's `google-services.json` aren't in git. See CLAUDE.md › Environment for how to get them.
 
 ## Changes
+
+### Admin v1.2.0 (16 Oct 2026)
+
+- **Formulas.** On a menu item, Stock is now Not tracked, Count pieces, or Formula.
+  - A formula lists the raw materials in one serving, e.g. Masala Chai = 80 ml milk + 8 g sugar + 3 g tea powder.
+  - Each size has its own formula. A new size starts as a copy of the first.
+  - It shows the cost of a serving at the last prices paid, and what share of the price that is.
+  - Every sale uses up its formula once the till is on v1.1.0. Sales are never blocked when stock runs out.
+- **Stock** (Inventory › Stock), for raw materials and items counted in pieces:
+  - Shows what's in stock, what's low, out or below zero, and what it's worth.
+  - Count stock (many materials in one go), Wastage, Stock in and Adjust.
+  - Vendor bills add stock automatically.
+  - A material bought in packs can say "1 tray = 30 pcs", and it is then counted in pieces.
+- **Usage:** over any date range, per material: opening, bought, used by sales, wasted, count difference (what a count found missing) and closing, each with what it's worth.
+- **Ledger:** every sale, bill, count and wastage that moved stock.
+- **Before it works in production:** the Firestore rules and indexes must be deployed (`npm run rules:deploy`). Until then, vendor bills entered in admin are refused too, because they now also add stock.
 
 ### Admin v1.1.0 (16 Oct 2026)
 

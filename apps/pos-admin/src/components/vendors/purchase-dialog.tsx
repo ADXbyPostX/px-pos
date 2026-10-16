@@ -264,6 +264,8 @@ export function PurchaseDialog({
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(paidPaise ? { paidNow: { id: ids.payment, amountPaise: paidPaise, mode: way, ...(ref.trim() ? { ref: ref.trim() } : {}) } } : {}),
         newMaterials: drafts.filter((d) => used.has(d.id)).map((d) => ({ id: d.id, material: { name: d.name, unit: d.unit, taxBps: d.taxBps, active: true } })),
+        // Each line adds to stock, in pieces for packs ("1 tray = 30 pcs").
+        stockUnits: Object.fromEntries(materials.map((m) => [m.id, { unit: m.unit, ...(m.pack ? { pack: m.pack } : {}) }])),
         today,
       });
     } catch (err) {

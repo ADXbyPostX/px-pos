@@ -37,7 +37,7 @@ const admin: PlanCtx = { cid: "c1", nowMs: Date.parse("2026-10-16T04:30:00Z"), a
 const BD = "2026-10-16";
 
 const postingOpsOf = (p: WritePlan) => p.ops.filter((o) => o.path.includes("/postings/"));
-const countedOpsOf = (p: WritePlan) => p.ops.filter((o) => o.path.includes("/dailyStats/") || o.path.includes("/stock/") || (o.path.includes("/vendors/") && o.op === "merge"));
+const countedOpsOf = (p: WritePlan) => p.ops.filter((o) => o.path.includes("/dailyStats/") || o.path.includes("/stock/") || o.path.includes("/inventory/") || (o.path.includes("/vendors/") && o.op === "merge"));
 
 /** One posting, created with set; every counted doc carries its key; no path twice. */
 function expectExactlyOnce(p: WritePlan) {
