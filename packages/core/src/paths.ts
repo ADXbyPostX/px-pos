@@ -30,6 +30,7 @@ export const COL = {
   purchases: "purchases",
   vendorPayments: "vendorPayments",
   inventory: "inventory",
+  months: "months",
 } as const;
 
 export type ClientCollection = (typeof COL)[keyof typeof COL];
@@ -66,6 +67,8 @@ export const paths = {
   vendorPayment: (cid: string, id: string) => `clients/${cid}/${COL.vendorPayments}/${id}`,
   /** The outlet's raw-material stock (one doc, see InventoryDoc). */
   inventory: (cid: string) => `clients/${cid}/${COL.inventory}/onHand`,
+  /** A closed (or reopened) month, "2026-10". */
+  month: (cid: string, m: string) => `clients/${cid}/${COL.months}/${m}`,
 } as const;
 
 /** Posting keys: the exactly-once ledger id for every stats/stock-moving batch. */

@@ -5,7 +5,8 @@ import { collection, query } from "firebase/firestore";
 import { Boxes, MoreHorizontal, Plus } from "lucide-react";
 import { addDays, formatStock, hasRecipe, materialLevel, materialStats, MATERIAL_UNIT_LABEL, paths, stockLevel, stockStats, type Item, type Material, type MaterialLevel, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { RowMenuContent } from "@/components/shared/row-menu";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Empty } from "@/components/shared/empty";
 import { SelectField } from "@/components/shared/form-controls";
@@ -100,14 +101,14 @@ export function StockView() {
           <MoreHorizontal aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <RowMenuContent>
         <DropdownMenuItem onSelect={() => a.move("in", r.id)}>Stock in</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => a.move("waste", r.id)}>Wastage</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => a.count([r.id])}>Count</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => a.move("adjust", r.id)}>Adjust</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => a.editMaterial(r.m)}>Edit</DropdownMenuItem>
-      </DropdownMenuContent>
+      </RowMenuContent>
     </DropdownMenu>
   );
 
@@ -167,11 +168,11 @@ export function StockView() {
               <MoreHorizontal aria-hidden />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <RowMenuContent>
             <DropdownMenuItem onSelect={() => a.itemMove("in", r.id)}>Stock in</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => a.itemMove("waste", r.id)}>Wastage</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => a.itemMove("count", r.id)}>Count</DropdownMenuItem>
-          </DropdownMenuContent>
+          </RowMenuContent>
         </DropdownMenu>
       ),
     },

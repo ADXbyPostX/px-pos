@@ -92,6 +92,14 @@
   - **Never blocking:** material stock never blocks a sale.
   - **Item plan:** `upsertItemPlan` only touches `recipe` when the caller passes the key (a price edit or menu import leaves it alone).
   - **Day close:** snapshots `materials` too.
+- **Month close** (admin › End of day › Months, Mandy 2026-11-07). `months/{YYYY-MM}` holds the frozen `MonthReport` (core `month.ts`).
+  - **The report:** `monthReport` sums the month's live `dailyStats` through `zReport`; invoice ranges and Z numbers come from that month's day docs.
+  - **Closing:** `monthCloseCheck` needs the month over (today's business date past its last day) and every day closed, including dates with sales but no day record. Admins close it; only the super admin reopens it (rules).
+  - **Frozen:** a closed month is frozen in admin. `useMonths().isFrozen` blocks vendor voids dated in it.
+  - **Late sales:** rules never refuse till sales for a closed month (offline batches must land). The Months page shows the live total against the frozen one as "after closing".
+  - **On the till:** Day › Month report (`can(role, "reports")`) prints it with `renderMonth`.
+- **Item order** (admin › Menu › Arrange): the till shows items by `item.sort`. The Arrange dialog (dnd-kit) reorders one category and reuses that category's own sort numbers, so it keeps its place among the others.
+- **Typing a quantity** (till): tap the quantity on a draft ticket line for `QtySheet` (keypad, max 999, 0 removes the line).
 - **Never hard-delete.** `active:false` or a `status` (`cancelled`/`void`). Rules deny delete everywhere.
 - Common fields: `schemaVersion`, `createdAtMs` (device), `createdAt` (serverTimestamp), `updatedAtMs`, `source`, `terminalId?`, `staffId?`, `outletId:'main'` on transactional docs.
 - Collection names/paths live in `@px-pos/core` (`paths.ts`) — never hand-type a path.

@@ -15,8 +15,11 @@ import {
   dayOpenPlan,
   invoiceLinesFor,
   itemPhotoPlan,
+  closeMonthPlan,
   kotPlan,
   materialMovePlan,
+  monthReport,
+  reopenMonthPlan,
   openingBalancePlan,
   pairPlan,
   pairingRequestPlan,
@@ -564,5 +567,20 @@ describe("inventory (raw materials)", () => {
     });
     await assertSucceeds(applyPlan(db("dev1"), p));
     expect(Object.keys((await read(INV))?.mat ?? {})).toHaveLength(25);
+  });
+});
+
+describe("months", () => {
+  const report = monthReport({ month: "2026-09", days: [], stats: [], builtAtMs: NOW });
+  it("an outlet's admin closes a month; tills and other admins can't; only the super admin reopens", async () => {
+    await assertFails(applyPlan(db("dev1"), closeMonthPlan(termCtx(), { month: "2026-09", report })));
+    await assertFails(applyPlan(db("adminB"), closeMonthPlan(adminCtx("adminB"), { month: "2026-09", report })));
+    await assertSucceeds(applyPlan(db("adminA"), closeMonthPlan(adminCtx("adminA"), { month: "2026-09", report })));
+    await assertSucceeds(getDoc(doc(db("dev1"), "clients/c1/months/2026-09")));
+    await assertFails(applyPlan(db("adminA"), reopenMonthPlan(adminCtx("adminA"), "2026-09", "late bill")));
+    await assertSucceeds(applyPlan(db("super"), reopenMonthPlan(adminCtx("super"), "2026-09", "late bill")));
+    await assertSucceeds(applyPlan(db("adminA"), closeMonthPlan(adminCtx("adminA"), { month: "2026-09", report })));
+    await assertFails(setDoc(doc(db("adminA"), "clients/c1/months/2026-08"), { month: "2026-07", status: "closed" }));
+    await assertFails(deleteDoc(doc(db("super"), "clients/c1/months/2026-09")));
   });
 });

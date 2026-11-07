@@ -5,7 +5,8 @@ import { collection, documentId, query, where } from "firebase/firestore";
 import { MoreHorizontal, Plus, Truck } from "lucide-react";
 import { addDays, bizDateLabel, paths, vendorBalance, vendorDay, vendorOverview, type DailyStats, type VendorRow } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { RowMenuContent } from "@/components/shared/row-menu";
 import { RankedBars } from "@/components/dashboard/charts";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { SelectField } from "@/components/shared/form-controls";
@@ -95,13 +96,13 @@ export function VendorsView() {
             <MoreHorizontal aria-hidden />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <RowMenuContent>
           <DropdownMenuItem onSelect={() => a.recordPurchase(r.id)}>Record purchase</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => a.pay(r.id)}>Pay</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => a.open({ kind: "vendor", id: r.id })}>Statement</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => a.editVendor(v)}>Edit</DropdownMenuItem>
-        </DropdownMenuContent>
+        </RowMenuContent>
       </DropdownMenu>
     );
   };

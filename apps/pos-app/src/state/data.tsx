@@ -1,6 +1,8 @@
 import { createContext, use, useCallback, useMemo, useState, type ReactNode } from "react";
 import { collection, query, where } from "@react-native-firebase/firestore";
 import {
+  recipeBook,
+  type RecipeBook,
   businessDateFor,
   paths,
   photoUri,
@@ -30,6 +32,8 @@ interface ClientData {
   photos: Map<string, string>;
   stock: Map<string, number>;
   tracked: ReadonlySet<string>;
+  /** Item formulas (raw materials per one sold): a sale uses them up in its own batch. */
+  recipes: RecipeBook;
   floors: WithId<Floor>[];
   tables: WithId<Table>[];
   staff: WithId<Staff>[];
@@ -102,6 +106,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       photos: photoMap,
       stock: new Map(stock.data.map((s) => [s.id, s.onHand])),
       tracked: new Set(sortedItems.filter((i) => i.trackStock).map((i) => i.id)),
+      recipes: recipeBook(sortedItems),
       floors: [...floors.data].sort(bySort),
       tables: [...tables.data].sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label, "en", { numeric: true })),
       staff: [...staff.data].sort((a, b) => a.name.localeCompare(b.name)),

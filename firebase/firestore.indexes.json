@@ -539,6 +539,11 @@
       "collectionGroup": "items",
       "fieldPath": "recipe",
       "indexes": []
+    },
+    {
+      "collectionGroup": "months",
+      "fieldPath": "report",
+      "indexes": []
     }
   ]
 }

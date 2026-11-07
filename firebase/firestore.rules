@@ -272,6 +272,12 @@ service cloud.firestore {
       match /stock/{i}          { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
       // Raw-material stock: one doc (onHand), moved only alongside its posting.
       match /inventory/{d}      { allow create, update: if (canRead(c) && posted(c)) || isSuper(); }
+      // A closed month (admin closes; only the super admin opens it again). Tills only read it.
+      match /months/{m} {
+        allow create: if canManage(c) && request.resource.data.status == 'closed' && request.resource.data.month == m;
+        allow update: if isSuper()
+          || (canManage(c) && resource.data.status == 'open' && request.resource.data.status == 'closed' && request.resource.data.month == m);
+      }
       match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper(); }
     }
 

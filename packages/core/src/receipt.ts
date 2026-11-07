@@ -2,6 +2,7 @@ import { halfRateLabel } from "./bill";
 import { MODE_LABEL, STATION_LABEL } from "./kot";
 import { validateReceiptLogo } from "./logo";
 import { formatINR } from "./money";
+import { monthLabel, type MonthReport } from "./month";
 import { bizDateLabel, istDateTimeLabel, istDateLabel } from "./time";
 import type { BillResult, BizDate, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, VendorPayMode, ZReport } from "./types";
 
@@ -377,6 +378,76 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
     for (const r of z.invoiceRanges) {
       out.push(t(`${r.series}: ${r.count} issued, ${r.cancelled} cancelled`));
       out.push(t(`  ${r.first} .. ${r.last}`));
+    }
+  }
+  out.push({ kind: "feed", lines: 2 });
+  out.push({ kind: "cut" });
+  return fit(out, cols);
+}
+
+/**
+ * A month's report (from admin, or printed on the till). `live` = the month isn't closed yet:
+ * figures so far, marked as such.
+ */
+export function renderMonth(r: MonthReport, opts: { cols: Cols; outletName: string; live?: boolean; closedAtMs?: number }): ReceiptLine[] {
+  const { cols } = opts;
+  const out: ReceiptLine[] = [];
+  const row = (l: string, v: Paise) => out.push(t(lr(l, money(v), cols)));
+  out.push(center(opts.outletName, { bold: true }));
+  out.push(center("MONTH REPORT", { bold: true, size: 2 }));
+  out.push(center(monthLabel(r.month), { bold: true }));
+  out.push(center(opts.live ? "Not closed: figures so far" : opts.closedAtMs ? `Closed ${istDateTimeLabel(opts.closedAtMs)}` : "Closed"));
+  out.push(center(`Printed ${istDateTimeLabel(r.builtAtMs)}`));
+  out.push(rule());
+  out.push(t(lr("Trading days", String(r.tradingDays), cols)));
+  if (r.zFrom != null) out.push(t(lr("Z reports", r.zFrom === r.zTo ? `#${r.zFrom}` : `#${r.zFrom} to #${r.zTo}`, cols)));
+  if (r.bestDay) out.push(t(lr(`Best day ${bizDateLabel(r.bestDay.date)}`, money(r.bestDay.totalPaise), cols)));
+  out.push(rule());
+  out.push(t("SALES", { bold: true }));
+  row("Gross", r.grossPaise);
+  row("Discounts", -r.discountsPaise);
+  if (r.compPaise) row("  of which comp", -r.compPaise);
+  row("Net sales", r.netPaise);
+  if (r.chargesPaise) row("Charges", r.chargesPaise);
+  row("CGST", r.cgstPaise);
+  row("SGST", r.sgstPaise);
+  row("Round off", r.roundOffPaise);
+  out.push(t(lr("TOTAL", money(r.totalPaise), cols), { bold: true }));
+  if (r.tipsPaise) row("Tips (outside bill)", r.tipsPaise);
+  out.push(t(lr("Orders / covers", `${r.orders} / ${r.covers}`, cols)));
+  if (r.orders) row("Average order", Math.round(r.totalPaise / r.orders));
+  if (r.tradingDays) row("Average day", Math.round(r.totalPaise / r.tradingDays));
+  if (Object.keys(r.byTaxBps).length) {
+    out.push(rule());
+    out.push(t("GST BY RATE", { bold: true }));
+    for (const [bps, v] of Object.entries(r.byTaxBps)) {
+      out.push(t(`${Number(bps) / 100}% on ${money(v.taxable)}`));
+      out.push(t(lr("  CGST + SGST", `${money(v.cgst)} + ${money(v.sgst)}`, cols)));
+    }
+  }
+  out.push(rule());
+  out.push(t("BY PAYMENT", { bold: true }));
+  for (const [mode, v] of Object.entries(r.byPay)) row(PAY_LABEL[mode as PayMode] ?? mode, v);
+  for (const [mode, v] of Object.entries(r.refundsByPay)) if (v) row(`Refund ${PAY_LABEL[mode as PayMode] ?? mode}`, -v);
+  out.push(t("BY ORDER TYPE", { bold: true }));
+  for (const [mode, v] of Object.entries(r.byMode)) out.push(t(lr(`${MODE_LABEL[mode as OrderMode] ?? mode} (${v.n})`, money(v.paise), cols)));
+  out.push(rule());
+  out.push(t(lr(`Cancelled bills (${r.cancelledBills.n})`, money(r.cancelledBills.paise), cols)));
+  out.push(t(lr(`Voided items (${r.voidItems.n})`, money(r.voidItems.paise), cols)));
+  row("Expenses", r.expensesPaise);
+  if (r.purchasesPaise) row(`Bought (${r.purchaseBills ?? 0} bills)`, r.purchasesPaise);
+  if (r.vendorPaidPaise) {
+    row("Paid to vendors", r.vendorPaidPaise);
+    for (const [m, v] of Object.entries(r.vendorPaidByMode ?? {})) if (v) row(`  ${VENDOR_PAY_PRINT[m as VendorPayMode] ?? m}`, v);
+  }
+  out.push(t(lr("Net sales - bought - expenses", money(r.netPaise - (r.purchasesPaise ?? 0) - r.expensesPaise), cols), { bold: true }));
+  if (r.stockWorthPaise != null) row("Stock worth at close", r.stockWorthPaise);
+  if (r.invoiceRanges.length) {
+    out.push(rule());
+    out.push(t("INVOICES", { bold: true }));
+    for (const ir of r.invoiceRanges) {
+      out.push(t(`${ir.series}: ${ir.count} issued, ${ir.cancelled} cancelled`));
+      out.push(t(`  ${ir.first} .. ${ir.last}`));
     }
   }
   out.push({ kind: "feed", lines: 2 });

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { ChevronLeft, Minus, Plus } from "lucide-react-native";
 import { formatINR, halfRateLabel, type BillResult, type Order, type OrderLine } from "@px-pos/core";
@@ -6,6 +6,7 @@ import { Text } from "@/components/ui/text";
 import type { WithId } from "@/hooks/use-live";
 import { colors } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import { QtySheet } from "./qty-sheet";
 
 function Row({ label, value, strong = false, muted = false }: { label: string; value: string; strong?: boolean; muted?: boolean }) {
   return (
@@ -59,7 +60,7 @@ function SentLine({ l }: { l: OrderLine }) {
   );
 }
 
-function DraftLine({ l, onQty }: { l: OrderLine; onQty: (qty: number) => void }) {
+function DraftLine({ l, onQty, onType }: { l: OrderLine; onQty: (qty: number) => void; onType: () => void }) {
   return (
     <View className="flex-row items-center gap-2 border-l-4 border-primary py-1.5 pr-3 pl-3">
       <View className="flex-1">
@@ -72,7 +73,10 @@ function DraftLine({ l, onQty }: { l: OrderLine; onQty: (qty: number) => void })
       <Pressable onPress={() => onQty(l.qty - 1)} accessibilityLabel={`One less ${l.name}`} className="h-11 w-11 items-center justify-center rounded-lg border border-border active:bg-accent">
         <Minus color={colors.foreground} size={20} />
       </Pressable>
-      <Text className="w-8 text-center text-lg font-semibold tabular-nums">{l.qty}</Text>
+      {/* Tap the number to type it (big orders), instead of pressing + fifty times. */}
+      <Pressable onPress={onType} accessibilityLabel={`${l.qty} ${l.name}. Tap to type how many`} hitSlop={4} className="h-11 min-w-12 items-center justify-center rounded-lg border border-dashed border-border px-1.5 active:bg-accent">
+        <Text className="text-lg font-semibold tabular-nums">{l.qty}</Text>
+      </Pressable>
       <Pressable onPress={() => onQty(l.qty + 1)} accessibilityLabel={`One more ${l.name}`} className="h-11 w-11 items-center justify-center rounded-lg border border-border active:bg-accent">
         <Plus color={colors.foreground} size={20} />
       </Pressable>
@@ -109,6 +113,8 @@ export function TicketPanel({
 }) {
   const sent = order ? Object.values(order.lines).sort((a, b) => a.seq - b.seq) : [];
   const empty = sent.length === 0 && lines.length === 0;
+  /** The line whose quantity is being typed on the keypad. */
+  const [typing, setTyping] = useState<OrderLine | null>(null);
   return (
     <View className={cn("border-l border-border bg-card", className)}>
       <View className="flex-row items-center gap-1 border-b border-border py-3 pr-4 pl-4">
@@ -132,11 +138,12 @@ export function TicketPanel({
         ))}
         {sent.length > 0 && lines.length > 0 ? <Text className="px-4 pt-3 pb-1 text-xs font-semibold text-primary">NEW — NOT SENT YET</Text> : null}
         {lines.map((l) => (
-          <DraftLine key={l.lineId} l={l} onQty={(q) => onQty(l.lineId, q)} />
+          <DraftLine key={l.lineId} l={l} onQty={(q) => onQty(l.lineId, q)} onType={() => setTyping(l)} />
         ))}
       </ScrollView>
       <TotalsBlock bill={bill} />
       <View className="gap-2 border-t border-border p-3">{actions}</View>
+      <QtySheet line={typing} onClose={() => setTyping(null)} onSet={(q) => typing && onQty(typing.lineId, q)} />
     </View>
   );
 }

@@ -92,7 +92,15 @@ function clientGroups(c: string, role: Role): NavGroup[] {
             { label: "Payments", href: `${c}/vendors/payments` },
           ],
         },
-        { label: "End of day", href: `${c}/day`, icon: "day" },
+        {
+          label: "End of day",
+          href: `${c}/day`,
+          icon: "day",
+          children: [
+            { label: "Days", href: `${c}/day` },
+            { label: "Months", href: `${c}/day/months` },
+          ],
+        },
       ],
     },
     {

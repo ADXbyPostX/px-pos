@@ -23,7 +23,7 @@ const GROUPS: Record<string, { label: string; prefixes: string[] }> = {
   bills: { label: "Bills", prefixes: ["bill.", "order.", "line.", "invoice."] },
   menu: { label: "Menu", prefixes: ["item.", "staff."] },
   stock: { label: "Stock", prefixes: ["stock.", "inventory.", "item.recipe"] },
-  cash: { label: "Cash & day", prefixes: ["cash.", "drawer.", "day.", "expense."] },
+  cash: { label: "Cash & day", prefixes: ["cash.", "drawer.", "day.", "month.", "expense."] },
   vendors: { label: "Vendors", prefixes: ["vendor.", "vendor_pay.", "purchase.", "material."] },
   setup: { label: "Setup", prefixes: ["client.", "terminal.", "table.", "kot."] },
 };
@@ -61,6 +61,8 @@ const ACTION_LABEL: Record<string, string> = {
   "day.close": "Day closed (Z)",
   "day.reopen": "Day reopened",
   "day.carry_forward": "Day carried forward",
+  "month.close": "Month closed",
+  "month.reopen": "Month reopened",
   "expense.void": "Expense voided",
   "vendor.create": "Vendor added",
   "vendor.update": "Vendor changed",

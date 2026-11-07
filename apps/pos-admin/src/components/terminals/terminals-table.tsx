@@ -5,7 +5,8 @@ import { MoreHorizontal } from "lucide-react";
 import { collection, getDocsFromServer, limit, query, where } from "firebase/firestore";
 import { fyFor, paths, presence, restartNumberingPlan, revokeTerminalPlan, SKEW_WARN_MS, terminalUpdatePlan, type CatalogLayout, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { RowMenuContent } from "@/components/shared/row-menu";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -183,7 +184,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
                 <MoreHorizontal aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <RowMenuContent>
               <DropdownMenuItem onSelect={() => setSettingsFor(t)}>Settings</DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
@@ -208,7 +209,7 @@ export function TerminalsTable({ rows, showClient = false }: { rows: TerminalRow
               >
                 Revoke
               </DropdownMenuItem>
-            </DropdownMenuContent>
+            </RowMenuContent>
           </DropdownMenu>
         ),
     },

@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { bizDateLabel, paths, purchaseVoidPlan, VENDOR_VOID_REASONS, vendorPaymentVoidPlan, type Day, type Paise, type Purchase, type VendorPayment, type WritePlan } from "@px-pos/core";
+import { bizDateLabel, monthLabel, monthOf, paths, purchaseVoidPlan, VENDOR_VOID_REASONS, vendorPaymentVoidPlan, type Day, type Paise, type Purchase, type VendorPayment, type WritePlan } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { FormDialog } from "@/components/shared/form-dialog";
 import { FormError, SelectField } from "@/components/shared/form-controls";
 import { useClient } from "@/components/providers/client-provider";
 import { usePrincipal } from "@/components/providers/principal-provider";
+import { useMonths } from "@/hooks/use-months";
 import { useDoc, type WithId } from "@/lib/firebase/hooks";
 import { useRunPlan } from "@/lib/run-plan";
 import { rs, wayLabel } from "./vendor-status";
@@ -54,6 +55,9 @@ export function VoidDialog({ target, onOpenChange, balancePaise, terminalName }:
   const vendorName = bill?.vendorName ?? (target?.kind === "payment" ? target.payment.vendorName : "");
   const date = bill?.businessDate ?? payment?.businessDate ?? null;
   const day = useDoc<Day>(target && date ? paths.day(cid, date) : null);
+  // A closed month is frozen: its days' figures can't change from admin.
+  const months = useMonths(cid);
+  const frozen = months.isFrozen(date);
   const after = balancePaise - (bill?.totalPaise ?? 0) + (payment?.amountPaise ?? 0);
   const opening = bill?.kind === "opening" || (target?.kind === "payment" && target.payment.kind === "opening");
   const owed = (p: Paise) => (p < 0 ? `${rs(-p)} advance` : rs(p));
@@ -85,7 +89,7 @@ export function VoidDialog({ target, onOpenChange, balancePaise, terminalName }:
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="submit" form="void-form" variant="destructive" disabled={pending}>
+          <Button type="submit" form="void-form" variant="destructive" disabled={pending || frozen}>
             {pending ? <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden /> : null}
             {bill ? (payment ? "Void bill and payment" : "Void bill") : "Void payment"}
           </Button>
@@ -105,6 +109,7 @@ export function VoidDialog({ target, onOpenChange, balancePaise, terminalName }:
                 {payment.mode === "drawer" && payment.drawerTerminalId ? `, and ${terminalName(payment.drawerTerminalId)}'s expected cash goes back up by the same.` : "."}
               </li>
             ) : null}
+            {frozen ? <li className="text-brand">{monthLabel(monthOf(date!))} is closed, so nothing dated in it can change. The super admin can reopen it (End of day › Months).</li> : null}
             {day.data?.status === "closed" && !opening ? <li className="text-warning">{bizDateLabel(date!)} is already closed. Its Z report stays as printed; the day&apos;s figures show the change.</li> : null}
           </ul>
           {linked ? (

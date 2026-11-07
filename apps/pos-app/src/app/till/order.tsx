@@ -69,7 +69,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
   }, [data.items]);
 
   if (!operator || !data.bizDate) return null;
-  const deps = { session, operator, bizDate: data.bizDate, tracked: data.tracked };
+  const deps = { session, operator, bizDate: data.bizDate, tracked: data.tracked, recipes: data.recipes };
   const quickPayFirst = mode === "quick" && session.client.modeOpts.quick.payFirst;
   const order = t.order;
   const hasNew = t.ticket.lines.length > 0;

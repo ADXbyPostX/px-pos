@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { bizDateLabel, cashStats, collected, expectedCashFor, formatINR, MODE_LABEL, netSales, np, VOID_REASONS, type OrderMode } from "@px-pos/core";
+import { bizDateLabel, can, cashStats, collected, expectedCashFor, formatINR, MODE_LABEL, netSales, np, VOID_REASONS, type OrderMode } from "@px-pos/core";
 import { EndOfDay } from "@/components/pos/end-of-day";
+import { MonthReportSheet } from "@/components/pos/month-report";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
@@ -50,6 +51,7 @@ export default function Day() {
   const params = useLocalSearchParams<{ close?: string }>();
   const router = useRouter();
   const [closingState, setClosing] = useState(false);
+  const [monthOpen, setMonthOpen] = useState(false);
   const closing = closingState || params.close === "1";
   const { tid } = usePaired();
   const { bizDate, day, drawer, stats, openOrders } = useData();
@@ -81,12 +83,20 @@ export default function Day() {
           <Text className="text-xl font-bold">{bizDate ? bizDateLabel(bizDate, true) : "Today"}</Text>
           <Text className={cn("text-sm font-semibold", day?.status === "closed" ? "text-warning" : "text-success")}>{day?.status === "closed" ? `Closed · Z ${day.zNo ?? ""}` : "Open"}</Text>
         </View>
-        {day?.status !== "closed" ? (
-          <Button variant="destructive" onPress={() => setClosing(true)} accessibilityLabel="End of day">
-            <Text>End of day</Text>
-          </Button>
-        ) : null}
+        <View className="flex-row flex-wrap gap-2">
+          {operator && can(operator.role, "reports") ? (
+            <Button variant="outline" onPress={() => setMonthOpen(true)} accessibilityLabel="Month report">
+              <Text>Month report</Text>
+            </Button>
+          ) : null}
+          {day?.status !== "closed" ? (
+            <Button variant="destructive" onPress={() => setClosing(true)} accessibilityLabel="End of day">
+              <Text>End of day</Text>
+            </Button>
+          ) : null}
+        </View>
       </View>
+      <MonthReportSheet open={monthOpen} onClose={() => setMonthOpen(false)} />
       <View className="flex-row flex-wrap gap-2">
         <Stat label="Orders" value={String(s?.orders ?? 0)} />
         <Stat label="Net sales" value={rs(netSales(s))} />

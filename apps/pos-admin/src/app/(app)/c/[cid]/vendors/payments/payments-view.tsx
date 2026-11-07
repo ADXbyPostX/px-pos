@@ -5,7 +5,8 @@ import { collection, orderBy, query, where } from "firebase/firestore";
 import { MoreHorizontal, Plus, Wallet } from "lucide-react";
 import { bizDateLabel, paths, vendorOverview, type VendorPayment } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { RowMenuContent } from "@/components/shared/row-menu";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Empty } from "@/components/shared/empty";
 import { Loadable } from "@/components/shared/loadable";
@@ -52,7 +53,7 @@ export function PaymentsView() {
           <MoreHorizontal aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <RowMenuContent>
         <DropdownMenuItem onSelect={() => a.open({ kind: "payment", id: p.id })}>Open</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => a.open({ kind: "vendor", id: p.vendorId })}>Vendor</DropdownMenuItem>
         {p.status !== "void" ? (
@@ -63,7 +64,7 @@ export function PaymentsView() {
             </DropdownMenuItem>
           </>
         ) : null}
-      </DropdownMenuContent>
+      </RowMenuContent>
     </DropdownMenu>
   );
 

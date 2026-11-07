@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { FileText, MoreHorizontal, Package, Plus } from "lucide-react";
 import { bizDateLabel, daysBetween, MATERIAL_UNIT_LABEL, purchaseSummary, unitRatePaise, vendorBalance, vendorPosition, type BillStatus as BillStatusOf, type MaterialUnit, type Purchase } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { RowMenuContent } from "@/components/shared/row-menu";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Empty } from "@/components/shared/empty";
 import { SelectField } from "@/components/shared/form-controls";
@@ -124,7 +125,7 @@ export function PurchasesView() {
           <MoreHorizontal aria-hidden />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <RowMenuContent>
         <DropdownMenuItem onSelect={() => a.open({ kind: "purchase", id: b.id })}>Open</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => a.open({ kind: "vendor", id: b.vendorId })}>Vendor</DropdownMenuItem>
         {b.status !== "void" ? (
@@ -136,7 +137,7 @@ export function PurchasesView() {
             </DropdownMenuItem>
           </>
         ) : null}
-      </DropdownMenuContent>
+      </RowMenuContent>
     </DropdownMenu>
   );
 

@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, FileUp, ImageUp, Pencil, Plus, UtensilsCrossed } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, FileUp, ImageUp, Pencil, Plus, UtensilsCrossed } from "lucide-react";
 import { addDays, hasRecipe, itemFlagPlan, lastRates, MODE_LABEL, rateLabel, recipeCost, recipeFor, reorderPlan, stockLevel, upsertItemPlan, type Item, type Paise } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -25,6 +25,7 @@ import { rs } from "@/components/vendors/vendor-status";
 import type { WithId } from "@/lib/firebase/hooks";
 import { useRunPlan } from "@/lib/run-plan";
 import { cn } from "@/lib/utils";
+import { ArrangeDialog } from "./arrange-dialog";
 import { CategoryDialog } from "./category-dialog";
 import { ImportDialog } from "./import-dialog";
 import { ItemThumb } from "./item-photo";
@@ -111,6 +112,7 @@ export function MenuView() {
   const [catDialog, setCatDialog] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
+  const [arrangeOpen, setArrangeOpen] = useState(false);
 
   const catName = useMemo(() => new Map(categories.data.map((c) => [c.id, c.name])), [categories.data]);
   const counts = useMemo(() => {
@@ -221,6 +223,10 @@ export function MenuView() {
                 <FoodMark type="nonveg" /> Non-veg
               </ToggleGroupItem>
             </ToggleGroup>
+            <Button size="sm" variant="outline" onClick={() => setArrangeOpen(true)} disabled={categories.data.length === 0 || items.data.length === 0}>
+              <ArrowUpDown data-icon="inline-start" aria-hidden />
+              Arrange
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} disabled={categories.status === "loading" || items.status === "loading"}>
               <FileUp data-icon="inline-start" aria-hidden />
               Import
@@ -339,6 +345,7 @@ export function MenuView() {
         materials={materials.data}
         rates={rates}
       />
+      <ArrangeDialog open={arrangeOpen} onOpenChange={setArrangeOpen} categories={categories.data} items={items.data} initialCategoryId={cat !== "all" ? cat : (categories.data[0]?.id ?? "")} />
       <PhotosDialog open={photosOpen} onOpenChange={setPhotosOpen} items={items.data} photos={photos.map} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} categories={categories.data} items={items.data} />
       <CategoryDialog open={catDialog} onOpenChange={setCatDialog} category={null} nextSort={(categories.data.at(-1)?.sort ?? 0) + 1} />

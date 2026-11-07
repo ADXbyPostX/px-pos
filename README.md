@@ -13,10 +13,10 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.0.2**, **admin v1.2.0**.
+Current version: **till v1.1.0**, **admin v1.3.0**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.2.0"). It comes from `apps/pos-admin/package.json`.
-- **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.0.2 → 10002.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.3.0"). It comes from `apps/pos-admin/package.json`.
+- **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.0 → 10100.
 
 ### Releasing a new version
 
@@ -46,6 +46,19 @@ Release builds are signed with the PX POS **upload key**: `apps/pos-app/credenti
 `apps/pos-admin/.env.local` and the app's `google-services.json` aren't in git. See CLAUDE.md › Environment for how to get them.
 
 ## Changes
+
+### Admin v1.3.0 and till v1.1.0 (7 Nov 2026)
+
+- **Close the month** (admin › End of day › Months):
+  - Once a month is over and every day in it is closed, Close month saves its report and freezes the month. Nothing dated in it can then be voided from admin.
+  - The report covers sales, GST by rate, payments, order types, expenses, vendor bills and payments, net sales minus bills and expenses, invoice ranges, and stock worth at the month end.
+  - Print it, or download a CSV for the accountant (day by day, GST by rate, invoice ranges).
+  - The super admin can reopen a month. Sales that reach a closed month later (offline tills) show as "after closing".
+- **Month report on the till:** Day › Month report (owner and manager) previews and prints this month so far, or an earlier month. A closed month prints its frozen report.
+- **Arrange items** (admin › Menu › Arrange): drag a category's items into the order the till shows them (mouse, touch or keyboard), or send a hot seller to the top in one click. The till follows straight away.
+- **Type a quantity on the till:** tap the number between − and + on a ticket line and type it (50 coffees in a few taps). 0 removes the line.
+- **Formulas on the till:** from v1.1.0, every sale uses up its items' formulas (admin › Stock).
+- **Before it works in production:** deploy the Firestore rules and indexes (`npm run rules:deploy`), then update every till at an outlet to v1.1.0.
 
 ### Admin v1.2.0 (16 Oct 2026)
 

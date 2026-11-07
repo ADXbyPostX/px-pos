@@ -28,6 +28,7 @@ import {
   type Supplier,
   type Terminal,
   type TenderInput,
+  type RecipeBook,
 } from "@px-pos/core";
 import type { WithId } from "@/hooks/use-live";
 import { allocateAndJournal, counterKey, deleteDraft, type JournalRow } from "@/local/db";
@@ -64,6 +65,8 @@ export interface ActionDeps {
   operator: WithId<Staff>;
   bizDate: BizDate;
   tracked: ReadonlySet<string>;
+  /** Item formulas: the raw materials a sale uses up (in the same exactly-once batch). */
+  recipes?: RecipeBook;
 }
 
 export function supplierOf(c: Client): Supplier {
@@ -124,6 +127,7 @@ export function sendKot(d: ActionDeps, t: Ticket, existing: WithId<Order> | null
         lines: t.lines,
         alloc: { numbers: kotNums, terminalCode: code },
         tracked: d.tracked,
+        ...(d.recipes ? { recipes: d.recipes } : {}),
         kitchen: kitchenOn(d.session.client),
       });
       return { plan, result: { orderId, orderNo, kots: plan.kots.map((k) => ({ id: k.id, kotNo: k.kotNo, station: k.station, items: k.items })) } };
@@ -251,6 +255,7 @@ export function quickCheckout(d: ActionDeps, t: Ticket, tenders: TenderInput[], 
         applied: res.applied,
         tipPaise,
         tracked: d.tracked,
+        ...(d.recipes ? { recipes: d.recipes } : {}),
         serviceChargeOptIn: t.serviceChargeOptIn,
         kitchen: kitchenOn(d.session.client),
       });

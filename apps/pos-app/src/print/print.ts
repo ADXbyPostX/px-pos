@@ -1,4 +1,4 @@
-import { printsKots, renderInvoice, renderKot, renderZ, type Client, type Cols, type InvoicePrint, type KotPrint, type Terminal, type ZReport } from "@px-pos/core";
+import { printsKots, renderInvoice, renderKot, renderMonth, renderZ, type Client, type Cols, type InvoicePrint, type KotPrint, type MonthReport, type Terminal, type ZReport } from "@px-pos/core";
 import { btPrinterPref } from "@/local/prefs";
 import { encodeReceipt } from "./encode";
 import { bluetoothPrinter, builtInPrinter, lanPrinter, type PrinterTransport } from "./transport";
@@ -60,6 +60,18 @@ export async function printZ(terminal: Terminal, outletName: string, z: ZReport,
   if (!r) return null;
   try {
     await r.transport.send(encodeReceipt(renderZ(z, { cols: r.cols, outletName, terminalNames }), r.cols));
+    return null;
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
+/** A month's report (Day › Month report). Unlike sales printing, it says when there's no printer. */
+export async function printMonth(terminal: Terminal, outletName: string, report: MonthReport, opts: { live: boolean; closedAtMs?: number }): Promise<string | null> {
+  const r = route(terminal.printers?.receipt);
+  if (!r) return "No printer is set up on this till (Sync › Hardware).";
+  try {
+    await r.transport.send(encodeReceipt(renderMonth(report, { cols: r.cols, outletName, live: opts.live, ...(opts.closedAtMs ? { closedAtMs: opts.closedAtMs } : {}) }), r.cols));
     return null;
   } catch (e) {
     return (e as Error).message;
