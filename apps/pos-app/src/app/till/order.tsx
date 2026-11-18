@@ -305,12 +305,12 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
         {side ? (
           <View className="flex-1 flex-row">
             <CategoryRail categories={data.categories} value={category} onChange={setCategory} counts={counts} width={sideW} />
-            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={150} />
+            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} onRemove={(i) => t.removeOne(i.id)} photos={data.photos} showPhotos={tilePhotos} minTile={150} />
           </View>
         ) : (
           <>
             <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} />
-            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={136} />
+            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} onRemove={(i) => t.removeOne(i.id)} photos={data.photos} showPhotos={tilePhotos} minTile={136} />
           </>
         )}
         {noticeBar}
@@ -347,7 +347,7 @@ function Register({ mode, ticketId, orderId, init, onDone, onSwitch }: { mode: O
         ) : (
           <>
             {side ? null : <CategoryRail horizontal categories={data.categories} value={category} onChange={setCategory} counts={counts} />}
-            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} photos={data.photos} showPhotos={tilePhotos} minTile={156} />
+            <ItemGrid items={data.items} categoryId={category} mode={mode} stock={data.stock} qtyByItem={t.qtyByItem} onAdd={t.add} onRemove={(i) => t.removeOne(i.id)} photos={data.photos} showPhotos={tilePhotos} minTile={156} />
           </>
         )}
         {noticeBar}

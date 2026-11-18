@@ -100,6 +100,7 @@
   - **On the till:** Day › Month report (`can(role, "reports")`) prints it with `renderMonth`.
 - **Item order** (admin › Menu › Arrange): the till shows items by `item.sort`. The Arrange dialog (dnd-kit) reorders one category and reuses that category's own sort numbers, so it keeps its place among the others.
 - **Typing a quantity** (till): tap the quantity on a draft ticket line for `QtySheet` (keypad, max 999, 0 removes the line).
+- **Menu tile −** (till 1.1.1, Mandy 2026-11-18): a dish on the ticket shows its unsent count and a − (`useTicket().removeOne`: one off the most recently added unsent line of that item). The − is a sibling overlay of the tile Pressable, never nested in it, so it doesn't also add one and stays reachable by its accessibility label ("Remove one {name}").
 - **Never hard-delete.** `active:false` or a `status` (`cancelled`/`void`). Rules deny delete everywhere.
 - Common fields: `schemaVersion`, `createdAtMs` (device), `createdAt` (serverTimestamp), `updatedAtMs`, `source`, `terminalId?`, `staffId?`, `outletId:'main'` on transactional docs.
 - Collection names/paths live in `@px-pos/core` (`paths.ts`) — never hand-type a path.

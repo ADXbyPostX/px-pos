@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { FlatList, Image, Pressable, View, type LayoutChangeEvent } from "react-native";
-import { Search, X } from "lucide-react-native";
+import { Minus, Search, X } from "lucide-react-native";
 import { formatINR, stockLevel, type Item, type OrderMode, type Variant } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ type It = WithId<Item>;
 
 /**
  * Item tiles: tap adds one; items with sizes open the size picker; long-press adds with a note.
+ * Once a dish is on the ticket, its tile shows how many and a − that takes one off (unsent lines).
  * With photos on, a dish's photo fills its tile under a dark name band; every tile in the
  * grid then shares the taller height so rows stay even.
  */
@@ -25,6 +26,7 @@ export function ItemGrid({
   stock,
   qtyByItem,
   onAdd,
+  onRemove,
   photos,
   showPhotos = true,
   minTile = 150,
@@ -35,6 +37,8 @@ export function ItemGrid({
   stock: Map<string, number>;
   qtyByItem: Map<string, number>;
   onAdd: (item: It, variant?: Variant, qty?: number, note?: string) => void;
+  /** Take one of this dish off the ticket (its most recently added unsent line). */
+  onRemove?: (item: It) => void;
   photos?: Map<string, string>;
   showPhotos?: boolean;
   minTile?: number;
@@ -91,10 +95,12 @@ export function ItemGrid({
             ) : level === "low" ? (
               <Text className="text-xs text-warning">{onHand} left</Text>
             ) : null;
+            const minus = Boolean(onRemove && inTicket);
             return (
               // The Pressable is the card itself: `active:` on a plain child View makes NativeWind
               // attach touch handlers to it, which swallows the tap before the Pressable sees it.
-              <View style={{ width: `${100 / cols}%` }} className="p-1">
+              // The − sits beside it (not inside), so its tap never also adds one.
+              <View style={{ width: `${100 / cols}%` }} className="relative p-1">
                 <Pressable
                   disabled={isOut}
                   onPress={() => (i.variants.length ? setPicking(i) : onAdd(i))}
@@ -119,7 +125,7 @@ export function ItemGrid({
                   {photo ? (
                     <>
                       <Image source={{ uri: photo }} resizeMode="cover" className="absolute inset-0 h-full w-full" accessibilityIgnoresInvertColors />
-                      <View className="absolute left-2 right-2 top-2 flex-row items-start justify-between">
+                      <View className={cn("absolute left-2 top-2 flex-row items-start justify-between", minus ? "right-12" : "right-2")}>
                         <View className="rounded bg-white p-0.5">
                           <FoodMark type={i.foodType} />
                         </View>
@@ -140,13 +146,26 @@ export function ItemGrid({
                           {i.name}
                         </Text>
                       </View>
-                      <View className="flex-row items-end justify-between">
-                        <Text className="text-muted-foreground">{price}</Text>
+                      <View className={cn("flex-row items-end justify-between gap-1", minus && "pr-10")}>
+                        <Text className="flex-1 text-muted-foreground" numberOfLines={1}>
+                          {price}
+                        </Text>
                         {badge}
                       </View>
                     </>
                   )}
                 </Pressable>
+                {minus ? (
+                  <Pressable
+                    onPress={() => onRemove?.(i)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove one ${i.name}`}
+                    className={cn("absolute right-3 h-9 w-9 items-center justify-center rounded-full border border-border bg-card active:bg-accent", photo ? "top-3" : "bottom-3")}
+                  >
+                    <Minus color={colors.foreground} size={18} />
+                  </Pressable>
+                ) : null}
               </View>
             );
           }}

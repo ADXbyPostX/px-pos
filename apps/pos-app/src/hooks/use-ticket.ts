@@ -64,6 +64,17 @@ export function useTicket(opts: { ticketId?: string; orderId?: string | null; mo
     [setTicket, stationOf, order, operator?.id],
   );
 
+  /** The menu tile's −: one off the item's most recently added unsent line (gone at 0). */
+  const removeOne = useCallback(
+    (itemId: string) =>
+      setTicket((t) => {
+        const idx = t.lines.map((l) => l.itemId).lastIndexOf(itemId);
+        if (idx < 0) return t;
+        const line = t.lines[idx]!;
+        return { ...t, lines: line.qty <= 1 ? t.lines.filter((_, k) => k !== idx) : t.lines.map((l, k) => (k === idx ? { ...l, qty: l.qty - 1 } : l)) };
+      }),
+    [setTicket],
+  );
   const setQty = useCallback((lineId: string, qty: number) => setTicket((t) => ({ ...t, lines: qty <= 0 ? t.lines.filter((l) => l.lineId !== lineId) : t.lines.map((l) => (l.lineId === lineId ? { ...l, qty } : l)) })), [setTicket]);
   const setNote = useCallback((lineId: string, note: string) => setTicket((t) => ({ ...t, lines: t.lines.map((l) => (l.lineId === lineId ? { ...l, ...(note ? { note } : { note: undefined }) } : l)) })), [setTicket]);
   const setBillDiscount = useCallback((d: Discount | undefined) => setTicket((t) => ({ ...t, billDiscount: d })), [setTicket]);
@@ -83,5 +94,5 @@ export function useTicket(opts: { ticketId?: string; orderId?: string | null; mo
     return m;
   }, [ticket.lines]);
 
-  return { ticket, setTicket, order, add, setQty, setNote, setBillDiscount, clear, sent, allLines, bill, qtyByItem };
+  return { ticket, setTicket, order, add, removeOne, setQty, setNote, setBillDiscount, clear, sent, allLines, bill, qtyByItem };
 }
