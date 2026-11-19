@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Loader2, Plus, Users } from "lucide-react";
+import { KeyRound, Loader2, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { capFor, ROLE_LABEL, STAFF_ROLES, upsertStaffPlan, validatePin, type Staff, type StaffRole } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import type { WithId } from "@/lib/firebase/hooks";
 import { newId } from "@/lib/ids";
 import { hashPin, suggestPin } from "@/lib/pin";
 import { useRunPlan } from "@/lib/run-plan";
+import { cn } from "@/lib/utils";
 
 type Row = WithId<Staff>;
 const ROLE_TONE: Record<StaffRole, "red" | "white" | "zinc" | "dim"> = { owner: "red", manager: "white", cashier: "zinc", captain: "zinc", kitchen: "dim" };
@@ -147,6 +148,79 @@ function StaffDialog({ open, onOpenChange, staff }: { open: boolean; onOpenChang
   );
 }
 
+/** Set or change one person's till PIN straight from the list (a forgotten PIN is replaced, never shown). */
+function StaffPinDialog({ staff, onOpenChange }: { staff: Row | null; onOpenChange: (o: boolean) => void }) {
+  const { cid } = useClient();
+  const { planCtx } = usePrincipal();
+  const { run, pending } = useRunPlan();
+  const [pin, setPin] = useState(suggestPin);
+  const [hashing, setHashing] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = hashing || pending;
+
+  // Fresh form each time it opens for someone — adjusted during render.
+  const [seen, setSeen] = useState<string | null>(null);
+  if ((staff?.id ?? null) !== seen) {
+    setSeen(staff?.id ?? null);
+    setPin(suggestPin());
+    setDone(null);
+    setError(null);
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!staff) return;
+    const bad = validatePin(pin);
+    if (bad) return setError(bad);
+    setError(null);
+    setHashing(true);
+    let pinHash: string;
+    try {
+      pinHash = await hashPin(pin);
+    } catch {
+      setHashing(false);
+      return setError("This browser couldn't secure the PIN. Try another browser.");
+    }
+    setHashing(false);
+    if (await run(upsertStaffPlan(planCtx(cid), staff.id, { name: staff.name, role: staff.role, active: staff.active, pinHash }, staff))) setDone(pin);
+  }
+
+  return (
+    <FormDialog
+      open={staff != null}
+      onOpenChange={(o) => !busy && onOpenChange(o)}
+      title={staff ? `${staff.name}'s till PIN` : "Till PIN"}
+      footer={
+        done ? (
+          <Button onClick={() => onOpenChange(false)}>Done</Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button type="submit" form="staff-pin-form" disabled={busy}>
+              {busy ? <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden /> : null}
+              {staff?.pinHash ? "Change PIN" : "Set PIN"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {done && staff ? (
+        <PinReveal name={staff.name} pin={done} />
+      ) : (
+        <form id="staff-pin-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
+          <Field label={staff?.pinHash ? "New till PIN (the old one stops working)" : "Till PIN (4–6 digits)"} htmlFor="sp-pin">
+            <PinInput id="sp-pin" value={pin} onChange={setPin} />
+          </Field>
+          <FormError error={error} />
+        </form>
+      )}
+    </FormDialog>
+  );
+}
+
 /** People who work the terminals: they pick their name on the till and type their PIN. */
 export function StaffView() {
   const { cid, client } = useClient();
@@ -155,30 +229,50 @@ export function StaffView() {
   const staff = useStaff(cid);
   const [editing, setEditing] = useState<Row | null>(null);
   const [open, setOpen] = useState(false);
+  const [pinFor, setPinFor] = useState<Row | null>(null);
   // Counts are the outlet's own people; admins' till entries are listed but not counted.
   const active = staff.data.filter((s) => s.active && !isAdminEntry(s));
 
+  const role = (s: Row) => (isAdminEntry(s) ? <Pill tone="red" label="Admin" /> : <Pill tone={ROLE_TONE[s.role]} label={ROLE_LABEL[s.role]} />);
+  // Set or change a PIN right from the list. An admin's till PIN belongs to the Admins page
+  // (it reaches every client they look after).
+  const pinButton = (s: Row, className?: string) =>
+    isAdminEntry(s) ? (
+      <span className="whitespace-nowrap text-sm text-muted-foreground">On Admins page</span>
+    ) : (
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn("whitespace-nowrap", !s.pinHash && "text-warning", className)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setPinFor(s);
+        }}
+        aria-label={`${s.pinHash ? "Change" : "Set"} ${s.name}'s till PIN`}
+      >
+        <KeyRound data-icon="inline-start" aria-hidden />
+        {s.pinHash ? "Change" : "Set PIN"}
+      </Button>
+    );
+  const toggle = (s: Row) => (
+    <Switch
+      checked={s.active}
+      disabled={isAdminEntry(s)}
+      aria-label={`${s.active ? "Deactivate" : "Activate"} ${s.name}`}
+      onClick={(e) => e.stopPropagation()}
+      onCheckedChange={(v) => void run(upsertStaffPlan(planCtx(cid), s.id, { name: s.name, role: s.role, active: v }, s), v ? `${s.name} activated` : `${s.name} deactivated`)}
+    />
+  );
+
   const columns: Column<Row>[] = [
     { key: "name", header: "Name", sort: (s) => s.name, cell: (s) => <UserChip name={s.name} /> },
-    { key: "role", header: "Role", sort: (s) => (isAdminEntry(s) ? -1 : STAFF_ROLES.indexOf(s.role)), cell: (s) => (isAdminEntry(s) ? <Pill tone="red" label="Admin" /> : <Pill tone={ROLE_TONE[s.role]} label={ROLE_LABEL[s.role]} />) },
-    { key: "pin", header: "Till PIN", sort: (s) => (s.pinHash ? 1 : 0), cell: (s) => (s.pinHash ? <span className="text-muted-foreground">Set</span> : <span className="text-warning">Not set</span>) },
+    { key: "role", header: "Role", sort: (s) => (isAdminEntry(s) ? -1 : STAFF_ROLES.indexOf(s.role)), cell: role },
+    // Pull the ghost padding back so the icon lines up with the column header.
+    { key: "pin", header: "Till PIN", sort: (s) => (s.pinHash ? 1 : 0), cell: (s) => pinButton(s, "-ml-2.5") },
     { key: "phone", header: "Phone", cell: (s) => <span className="text-muted-foreground tabular-nums">{s.phone ?? "—"}</span>, hideBelow: "md" },
     { key: "cap", header: "Discount limit", align: "right", sort: (s) => capFor(s.role, client, s.discountCapBps), cell: (s) => `${capFor(s.role, client, s.discountCapBps) / 100}%`, hideBelow: "lg" },
     { key: "status", header: "Status", sort: (s) => (s.active ? 1 : 0), cell: (s) => <ActiveBadge active={s.active} /> },
-    {
-      key: "toggle",
-      header: <span className="sr-only">Active</span>,
-      align: "right",
-      cell: (s) => (
-        <Switch
-          checked={s.active}
-          disabled={isAdminEntry(s)}
-          aria-label={`${s.active ? "Deactivate" : "Activate"} ${s.name}`}
-          onClick={(e) => e.stopPropagation()}
-          onCheckedChange={(v) => void run(upsertStaffPlan(planCtx(cid), s.id, { name: s.name, role: s.role, active: v }, s), v ? `${s.name} activated` : `${s.name} deactivated`)}
-        />
-      ),
-    },
+    { key: "toggle", header: <span className="sr-only">Active</span>, align: "right", cell: toggle },
   ];
 
   return (
@@ -211,10 +305,21 @@ export function StaffView() {
             }}
             caption="Staff"
             rowClassName={(s) => (s.active ? undefined : "opacity-60")}
+            mobileRow={(s) => (
+              <div className={cn("flex items-center gap-2", !s.active && "opacity-60")}>
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
+                  <UserChip name={s.name} className="max-w-full" />
+                  <span className="pl-8">{role(s)}</span>
+                </div>
+                {pinButton(s)}
+                {toggle(s)}
+              </div>
+            )}
           />
         )}
       </Loadable>
       <StaffDialog open={open} onOpenChange={setOpen} staff={editing} />
+      <StaffPinDialog staff={pinFor} onOpenChange={(o) => !o && setPinFor(null)} />
     </>
   );
 }

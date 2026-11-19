@@ -13,9 +13,9 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.1.1**, **admin v1.3.0**.
+Current version: **till v1.1.1**, **admin v1.3.1**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.3.0"). It comes from `apps/pos-admin/package.json`.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.3.1"). It comes from `apps/pos-admin/package.json`.
 - **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.1 → 10101.
 
 ### Releasing a new version
@@ -46,6 +46,10 @@ Release builds are signed with the PX POS **upload key**: `apps/pos-app/credenti
 `apps/pos-admin/.env.local` and the app's `google-services.json` aren't in git. See CLAUDE.md › Environment for how to get them.
 
 ## Changes
+
+### Admin v1.3.1 (19 Nov 2026)
+
+- **Change a till PIN from the Staff list:** the Till PIN column (and each row on a phone) has a **Change** button, or **Set PIN** when someone has none. It suggests a new PIN, shows it once to hand over, and the old one stops working as soon as the till is online. A forgotten PIN is replaced this way; it can't be looked up. An admin's till PIN is still changed on the Admins page.
 
 ### Till v1.1.1 (18 Nov 2026)
 
