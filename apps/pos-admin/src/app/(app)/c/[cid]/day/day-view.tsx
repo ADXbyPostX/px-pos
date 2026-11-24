@@ -5,6 +5,7 @@ import { collection, documentId, limit, orderBy, query, where } from "firebase/f
 import { CalendarCheck } from "lucide-react";
 import { bizDateLabel, businessDateFor, paths, receiptText, renderZ, vendorDay, zReport, type DailyStats, type Day, type Drawer, type Staff, type Terminal, type ZReport } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Loadable } from "@/components/shared/loadable";
 import { Money } from "@/components/shared/money";
@@ -16,6 +17,7 @@ import { useClient } from "@/components/providers/client-provider";
 import { useCollection, useNow, type WithId } from "@/lib/firebase/hooks";
 import { fmtDateTime } from "@/lib/format";
 import { CloseDayDialog } from "./close-day-dialog";
+import { DayItems } from "./day-items";
 
 type Row = WithId<Day> & { stats?: WithId<DailyStats> };
 
@@ -52,6 +54,8 @@ export function DayView() {
   const terminals = useCollection<Terminal>(`terminals:${cid}`, (db) => query(collection(db, paths.col(cid, "terminals"))));
   const [openId, setOpenId] = useState<string | null>(null);
   const [closing, setClosing] = useState<string | null>(null);
+  // Stays on the tab you picked while you move between days.
+  const [tab, setTab] = useState<"z" | "items">("z");
 
   const rows = useMemo<Row[]>(() => {
     const byDate = new Map(stats.data.map((s) => [s.id, s]));
@@ -167,9 +171,20 @@ export function DayView() {
         }
       >
         {open && report ? (
-          <pre aria-label={open.status === "closed" ? "Z report" : "X report"} className="overflow-x-auto rounded-lg border bg-white px-3 py-3 font-mono text-[11px] leading-snug text-black">
-            {receiptText(renderZ(report, { cols: 48, outletName: client.name, terminalNames, ...(open.status === "closed" ? {} : { title: "X REPORT" as const }) }), 48)}
-          </pre>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as "z" | "items")} className="gap-3">
+            <TabsList className="w-full">
+              <TabsTrigger value="z">{open.status === "closed" ? "Z report" : "X report"}</TabsTrigger>
+              <TabsTrigger value="items">Items</TabsTrigger>
+            </TabsList>
+            <TabsContent value="z">
+              <pre aria-label={open.status === "closed" ? "Z report" : "X report"} className="overflow-x-auto rounded-lg border bg-white px-3 py-3 font-mono text-[11px] leading-snug text-black">
+                {receiptText(renderZ(report, { cols: 48, outletName: client.name, terminalNames, ...(open.status === "closed" ? {} : { title: "X REPORT" as const }) }), 48)}
+              </pre>
+            </TabsContent>
+            <TabsContent value="items">
+              <DayItems cid={cid} outletName={client.name} businessDate={open.id} live={open.status !== "closed"} />
+            </TabsContent>
+          </Tabs>
         ) : null}
       </RecordSheet>
       <CloseDayDialog cid={cid} businessDate={closing} today={today} stats={closing ? rows.find((r) => r.id === closing)?.stats : undefined} terminals={terminals.data} onOpenChange={(o) => !o && setClosing(null)} />

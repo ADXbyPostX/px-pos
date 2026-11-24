@@ -46,6 +46,7 @@ import { usePrincipal } from "@/components/providers/principal-provider";
 import { stockValue } from "@/components/inventory/material-sheet";
 import { useMonths } from "@/hooks/use-months";
 import { useMaterials, useRecentPurchases } from "@/hooks/use-vendors";
+import { csvRupees, csvText, downloadCsv, fileSafe, printText } from "@/lib/export";
 import { useCollection, useDoc, useNow, type WithId } from "@/lib/firebase/hooks";
 import { fmtDateTime } from "@/lib/format";
 import { useRunPlan } from "@/lib/run-plan";
@@ -73,9 +74,7 @@ function StatusPill({ r }: { r: Row }) {
   return <Pill tone="yellow" label={`${r.openDays.length} day${r.openDays.length === 1 ? "" : "s"} open`} />;
 }
 
-/** Comma-separated, quoted where needed. */
-const csvCell = (v: string | number) => (typeof v === "number" ? String(v) : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-const paise = (p: number | undefined) => ((p ?? 0) / 100).toFixed(2);
+const paise = csvRupees;
 
 /** Per-day lines, GST by rate and the month's totals, for the accountant. */
 function monthCsv(r: MonthReport, days: Array<WithId<DailyStats>>, zOf: Map<string, number | undefined>): string {
@@ -92,27 +91,7 @@ function monthCsv(r: MonthReport, days: Array<WithId<DailyStats>>, zOf: Map<stri
   lines.push([]);
   lines.push(["Invoice series", "First", "Last", "Issued", "Cancelled"]);
   for (const ir of r.invoiceRanges) lines.push([ir.series, ir.first, ir.last, String(ir.count), String(ir.cancelled)]);
-  return lines.map((l) => l.map(csvCell).join(",")).join("\n");
-}
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-/** The report as it prints on the till, in a print window. */
-function printText(title: string, text: string) {
-  const w = window.open("", "_blank", "width=480,height=720");
-  if (!w) return;
-  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-  w.document.write(`<!doctype html><title>${title}</title><pre style="font:12px/1.35 ui-monospace,Menlo,monospace;margin:16px">${esc}</pre>`);
-  w.document.close();
-  w.focus();
-  w.print();
+  return csvText(lines);
 }
 
 /**
@@ -288,7 +267,7 @@ export function MonthsView() {
                   const { from, to } = monthRange(open.month);
                   const inMonth = stats.data.filter((s) => s.id >= from && s.id <= to);
                   const zOf = new Map(days.data.map((d) => [d.id, d.zNo]));
-                  download(`${client.name.replace(/[^\w]+/g, "-")}-${open.month}.csv`, monthCsv(open.report, inMonth, zOf));
+                  downloadCsv(`${fileSafe(client.name)}-${open.month}.csv`, monthCsv(open.report, inMonth, zOf));
                 }}
               >
                 <Download data-icon="inline-start" aria-hidden />

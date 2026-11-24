@@ -1,6 +1,7 @@
 import { halfRateLabel } from "./bill";
 import { MODE_LABEL, STATION_LABEL } from "./kot";
 import { validateReceiptLogo } from "./logo";
+import { itemLabel, type ItemSales } from "./item-sales";
 import { formatINR } from "./money";
 import { monthLabel, type MonthReport } from "./month";
 import { bizDateLabel, istDateTimeLabel, istDateLabel } from "./time";
@@ -380,6 +381,43 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
       out.push(t(`  ${r.first} .. ${r.last}`));
     }
   }
+  out.push({ kind: "feed", lines: 2 });
+  out.push({ kind: "cut" });
+  return fit(out, cols);
+}
+
+/**
+ * Item sales for a business day, laid out like the Z: each dish (and size) with quantity and
+ * gross (menu price × qty, GST included, before discounts). Long names wrap under themselves;
+ * the numbers stay on the first line. `live` = the day isn't closed yet.
+ */
+export function renderItemSales(s: ItemSales, opts: { cols: Cols; outletName: string; businessDate: BizDate; printedAtMs: number; live?: boolean }): ReceiptLine[] {
+  const { cols } = opts;
+  const qtyW = cols === 48 ? 6 : 5;
+  const amtW = cols === 48 ? 12 : 10;
+  const nameW = cols - qtyW - amtW;
+  const line3 = (name: string, qty: string, amt: string, bold = false) => {
+    const parts = wrap(name, nameW - 1);
+    out.push(t(parts[0]!.padEnd(nameW) + padL(qty, qtyW) + padL(amt, amtW), bold ? { bold: true } : {}));
+    for (const p of parts.slice(1)) out.push(t(`  ${p}`.slice(0, cols)));
+  };
+  const out: ReceiptLine[] = [];
+  out.push(center(opts.outletName, { bold: true }));
+  out.push(center("ITEM SALES", { bold: true, size: 2 }));
+  out.push(center(`Business day ${istDateLabel(Date.parse(`${opts.businessDate}T12:00:00+05:30`))}`));
+  out.push(center(`${opts.live ? "So far" : "Printed"} ${istDateTimeLabel(opts.printedAtMs)}`));
+  if (opts.live) out.push(center("(day not closed)"));
+  out.push(rule());
+  out.push(t("Item".padEnd(nameW) + padL("Qty", qtyW) + padL("Gross", amtW), { bold: true }));
+  for (const r of s.rows) line3(itemLabel(r), String(r.qty), money(r.grossPaise));
+  out.push(rule());
+  line3(`Total (${s.rows.length} item${s.rows.length === 1 ? "" : "s"})`, String(s.qty), money(s.grossPaise), true);
+  out.push(t(lr("Bills", String(s.bills), cols)));
+  if (s.discPaise) {
+    out.push(t(lr("Discounts", money(-s.discPaise), cols)));
+    out.push(t(lr("Gross less discounts", money(s.grossPaise - s.discPaise), cols)));
+  }
+  out.push(t("Gross = menu price x qty, GST included."));
   out.push({ kind: "feed", lines: 2 });
   out.push({ kind: "cut" });
   return fit(out, cols);
