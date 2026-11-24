@@ -45,6 +45,19 @@ service cloud.firestore {
         && !exists(/databases/$(db)/documents/clients/$(c)/postings/$(k));
     }
 
+    // End of day › Move bills: an admin re-dates a bill to the day it was sold, and nothing else.
+    function retagOnly(c) { return canManage(c) && changed().hasOnly(['businessDate', 'movedFrom', 'updatedAtMs']); }
+    // A day inside a closed month can't be fixed (only the super admin reopens a month).
+    function monthClosed(c, d) {
+      let m = /databases/$(db)/documents/clients/$(c)/months/$(d[0:7]);
+      return exists(m) && get(m).data.status == 'closed';
+    }
+    // This batch closes the day (it was open before and is closed after): a reopened day closing again.
+    function closesNow(c, d) {
+      let p = /databases/$(db)/documents/clients/$(c)/days/$(d);
+      return exists(p) && get(p).data.status != 'closed' && getAfter(p).data.status == 'closed';
+    }
+
     // A terminal may only issue the next number of its own series (seq recorded on its terminal doc).
     function validInvoiceSeq(c) {
       let t = myTerminal(c);
@@ -159,22 +172,24 @@ service cloud.firestore {
       // Sales.
       match /orders/{id} {
         allow create: if canManage(c) || (isMember(c) && request.resource.data.terminalId == myTerminal(c));
-        allow update: if canRead(c)
+        allow update: if (canRead(c)
           // An invoice, once attached, can never be swapped (blocks double billing from two tablets).
           && (!('invoiceId' in resource.data) || request.resource.data.get('invoiceId', null) == resource.data.invoiceId)
           && (resource.data.status != 'settled'
               || (request.resource.data.status in ['settled', 'cancelled']
                   && changed().hasOnly(['delivery', 'flags', 'cancel', 'status', 'updatedAtMs', 'rev'])))
-          && (resource.data.status != 'cancelled' || changed().hasOnly(['flags', 'updatedAtMs']));
+          && (resource.data.status != 'cancelled' || changed().hasOnly(['flags', 'updatedAtMs'])))
+          || retagOnly(c);
       }
 
       match /invoices/{id} {
         allow create: if canManage(c) || (isMember(c) && validInvoiceSeq(c));
-        allow update: if canRead(c) && resource.data.status == 'issued'
+        allow update: if (canRead(c) && resource.data.status == 'issued'
           && (changed().hasOnly(['status', 'cancel', 'printedCount', 'lastPrintedAtMs', 'updatedAtMs'])
               // Edit bill: same number, new bill, only while the order is not settled.
               || (changed().hasOnly(['bill', 'lines', 'modifiedCount', 'updatedAtMs'])
-                  && getAfter(/databases/$(db)/documents/clients/$(c)/orders/$(resource.data.orderId)).data.status != 'settled'));
+                  && getAfter(/databases/$(db)/documents/clients/$(c)/orders/$(resource.data.orderId)).data.status != 'settled')))
+          || retagOnly(c);
       }
 
       match /kots/{id} {
@@ -196,8 +211,17 @@ service cloud.firestore {
       // Day, drawers, aggregates.
       match /days/{d} {
         allow create: if canRead(c);
-        // Closed days are locked; only the super admin can reopen.
-        allow update: if (canRead(c) && resource.data.status != 'closed') || isSuper();
+        // Closed days are locked, except for fixes by the super admin or the outlet's admins (End of day):
+        // a rebuilt Z under the same number, the Z as printed, the list of fixes, or a reopen.
+        allow update: if (canRead(c) && resource.data.status != 'closed') || isSuper()
+          || (canManage(c) && resource.data.status == 'closed'
+              && changed().hasOnly(['z', 'zFirst', 'corrections', 'status', 'reopenedAtMs', 'reopenedBy', 'reopenReason', 'updatedAtMs'])
+              && !monthClosed(c, d));
+      }
+      // Bills moved between business days: written with the move's own "out" posting, then marked re-dated.
+      match /dayMoves/{id} {
+        allow create: if canManage(c) && postedNow(c, 'dmove:' + id + ':out');
+        allow update: if canManage(c) && changed().hasOnly(['retag', 'retaggedAtMs', 'updatedAtMs']);
       }
       match /drawers/{id} {
         allow create: if canRead(c);
@@ -278,7 +302,8 @@ service cloud.firestore {
         allow update: if isSuper()
           || (canManage(c) && resource.data.status == 'open' && request.resource.data.status == 'closed' && request.resource.data.month == m);
       }
-      match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper(); }
+      // A reopened day closing again rewrites its snapshot in the same batch.
+      match /stockSnapshots/{d} { allow create: if canRead(c); allow update: if isSuper() || (canRead(c) && closesNow(c, d)); }
     }
 
     // ── super-admin cross-client views (collection groups) ──────────────────

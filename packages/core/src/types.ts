@@ -423,6 +423,8 @@ export interface Order extends Meta {
   token?: number;
   mode: OrderMode;
   businessDate: BizDate;
+  /** Set when an admin moved the bill to the day it was sold (End of day › Move bills): the day it was stamped with. */
+  movedFrom?: BizDate;
   /** Owning terminal. Only it may bill offline. */
   terminalId: string;
   status: OrderStatus;
@@ -573,6 +575,8 @@ export interface Invoice extends Meta {
   dateIST: string;
   issuedAtMs: number;
   businessDate: BizDate;
+  /** Set when an admin moved the bill to the day it was sold: the day it was stamped with. */
+  movedFrom?: BizDate;
   docType: DocType;
   mode: OrderMode;
   where: string;
@@ -806,8 +810,60 @@ export interface Day {
   approvedBy?: string;
   zNo?: number;
   z?: ZReport;
+  /** The Z as first printed, kept once the day is corrected or reopened (z then holds the corrected one). */
+  zFirst?: ZReport;
+  /** Fixes made to the day after it closed, oldest first. */
+  corrections?: DayCorrection[];
+  reopenedAtMs?: number;
+  reopenedBy?: string;
+  reopenReason?: string;
   carriedForward?: boolean;
   updatedAtMs: number;
+}
+
+/** One fix to a business day (admin › End of day). */
+export interface DayCorrection {
+  kind: "move_out" | "move_in" | "recount" | "reopen";
+  atMs: number;
+  by: string;
+  byName?: string;
+  /** Why (typed by the admin). */
+  note: string;
+  /** Moves: the other day, how many bills and their total. */
+  moveId?: string;
+  otherDate?: BizDate;
+  bills?: number;
+  totalPaise?: Paise;
+  /** Recount: which drawer, and the count before / after (null = not counted). */
+  terminalId?: string;
+  fromPaise?: Paise | null;
+  toPaise?: Paise | null;
+}
+
+/**
+ * Bills moved from the business day they were stamped with to the day they were sold, with
+ * their exact posting deltas (cash stays with the drawer it was counted in). Id = moveId.
+ */
+export interface DayMove {
+  from: BizDate;
+  to: BizDate;
+  /** The postings moved (never moved twice). */
+  keys: string[];
+  orderIds: string[];
+  bills: number;
+  totalPaise: Paise;
+  byPay: Record<string, Paise>;
+  reason: string;
+  by: string;
+  byName?: string;
+  atMs: number;
+  /** "pending" until every order and invoice carries the new business day. */
+  retag: "pending" | "done";
+  retaggedAtMs?: number;
+  schemaVersion: 1;
+  createdAtMs: number;
+  updatedAtMs: number;
+  source: Source;
 }
 
 export interface Drawer {
@@ -824,6 +880,8 @@ export interface Drawer {
   note?: string;
   closedBy?: string;
   closedAtMs?: number;
+  /** Counts changed after the close (admin recount, or a reopen clearing it), oldest first. */
+  countHistory?: Array<{ fromPaise: Paise | null; toPaise: Paise | null; by: string; atMs: number; reason: string }>;
   updatedAtMs: number;
 }
 
@@ -943,7 +1001,9 @@ export type PostingKind =
   | "material_in"
   | "material_waste"
   | "material_adjust"
-  | "material_count";
+  | "material_count"
+  /** Admin moved bills between business days (End of day › Move bills): one out, one in. */
+  | "day_move";
 
 export interface Posting {
   kind: PostingKind;

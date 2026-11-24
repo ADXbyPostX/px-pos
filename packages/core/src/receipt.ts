@@ -5,7 +5,7 @@ import { itemLabel, type ItemSales } from "./item-sales";
 import { formatINR } from "./money";
 import { monthLabel, type MonthReport } from "./month";
 import { bizDateLabel, istDateTimeLabel, istDateLabel } from "./time";
-import type { BillResult, BizDate, Buyer, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, VendorPayMode, ZReport } from "./types";
+import type { BillResult, BizDate, Buyer, DayCorrection, DocType, InvoiceLine, Kot, OrderMode, Paise, PayMode, ReceiptLogo, ReceiptPart, Supplier, VendorPayMode, ZReport } from "./types";
 
 /**
  * Printer-neutral receipt model. ASCII only: ESC/POS code pages have no ₹, so printed
@@ -313,12 +313,13 @@ export function renderKot(k: KotPrint, opts: { cols: Cols }): ReceiptLine[] {
 }
 
 /** X (running) or Z (closed) report. */
-export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; title?: "Z REPORT" | "X REPORT"; terminalNames?: Record<string, string> }): ReceiptLine[] {
+export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; title?: "Z REPORT" | "X REPORT"; terminalNames?: Record<string, string>; corrections?: DayCorrection[] }): ReceiptLine[] {
   const { cols } = opts;
   const title = opts.title ?? "Z REPORT";
   const out: ReceiptLine[] = [];
   out.push(center(opts.outletName, { bold: true }));
   out.push(center(title === "Z REPORT" ? `Z REPORT #${z.zNo}` : "X REPORT (day not closed)", { bold: true, size: 2 }));
+  if (title === "Z REPORT" && opts.corrections?.some((c) => c.kind !== "reopen")) out.push(center("CORRECTED", { bold: true }));
   out.push(center(`Business day ${istDateLabel(Date.parse(`${z.businessDate}T12:00:00+05:30`))}`));
   out.push(center(`Printed ${istDateTimeLabel(z.closedAtMs)}`));
   out.push(rule());
@@ -381,9 +382,31 @@ export function renderZ(z: ZReport, opts: { cols: Cols; outletName: string; titl
       out.push(t(`  ${r.first} .. ${r.last}`));
     }
   }
+  if (opts.corrections?.length) {
+    out.push(rule());
+    out.push(t("CHANGES AFTER CLOSE", { bold: true }));
+    for (const c of opts.corrections) {
+      out.push(t(`${istDateTimeLabel(c.atMs)}${c.byName ? ` - ${c.byName}` : ""}`, { bold: true }));
+      out.push(t(correctionText(c, opts.terminalNames)));
+      if (c.note) out.push(t(`Why: ${c.note}`));
+    }
+  }
   out.push({ kind: "feed", lines: 2 });
   out.push({ kind: "cut" });
   return fit(out, cols);
+}
+
+/** One fix to a day, in words (Z report, admin). */
+export function correctionText(c: DayCorrection, terminalNames?: Record<string, string>): string {
+  const bills = `${c.bills ?? 0} bill${c.bills === 1 ? "" : "s"} (${money(c.totalPaise ?? 0)})`;
+  const other = c.otherDate ? bizDateLabel(c.otherDate) : "another day";
+  if (c.kind === "move_out") return `Moved ${bills} to ${other}, the day they were sold.`;
+  if (c.kind === "move_in") return `${bills} moved in from ${other}.`;
+  if (c.kind === "recount") {
+    const who = c.terminalId ? (terminalNames?.[c.terminalId] ?? c.terminalId) : "a drawer";
+    return `Cash count for ${who}: ${c.fromPaise == null ? "not counted" : money(c.fromPaise)} -> ${c.toPaise == null ? "not counted" : money(c.toPaise)}.`;
+  }
+  return "Day reopened.";
 }
 
 /**

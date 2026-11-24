@@ -31,6 +31,7 @@ export const COL = {
   vendorPayments: "vendorPayments",
   inventory: "inventory",
   months: "months",
+  dayMoves: "dayMoves",
 } as const;
 
 export type ClientCollection = (typeof COL)[keyof typeof COL];
@@ -69,6 +70,8 @@ export const paths = {
   inventory: (cid: string) => `clients/${cid}/${COL.inventory}/onHand`,
   /** A closed (or reopened) month, "2026-10". */
   month: (cid: string, m: string) => `clients/${cid}/${COL.months}/${m}`,
+  /** Bills moved between business days (DayMove). */
+  dayMove: (cid: string, id: string) => `clients/${cid}/${COL.dayMoves}/${id}`,
 } as const;
 
 /** Posting keys: the exactly-once ledger id for every stats/stock-moving batch. */
@@ -90,6 +93,8 @@ export const postingKey = {
   purchaseVoid: (id: string) => `vbillx:${id}`,
   vendorPay: (id: string) => `vpay:${id}`,
   vendorPayVoid: (id: string) => `vpayx:${id}`,
+  /** Bills moved between business days: the "out" posting on the old day, "in" on the right one. */
+  dayMove: (moveId: string, side: "out" | "in") => `dmove:${moveId}:${side}`,
 } as const;
 
 /** 10-digit Indian mobile from any input ("+91 98765-43210" → "9876543210"), or null. */

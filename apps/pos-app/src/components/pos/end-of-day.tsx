@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { collection, query, where } from "@react-native-firebase/firestore";
-import { bizDateLabel, can, cashStats, expectedCashFor, formatINR, parseINR, paths, type Drawer, type Terminal } from "@px-pos/core";
+import { addDays, bizDateLabel, can, cashStats, expectedCashFor, formatINR, isEarlyClose, istClock, parseINR, paths, type Drawer, type Terminal } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { closeDayOnTill } from "@/actions/day";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { useLiveQuery } from "@/hooks/use-live";
+import { useLiveQuery, useNow } from "@/hooks/use-live";
 import { cn } from "@/lib/utils";
 import { printZ } from "@/print/print";
 import { useData } from "@/state/data";
@@ -52,6 +52,9 @@ export function EndOfDay({ onCancel }: { onCancel: () => void }) {
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Closing today's day early: the first tap asks, the second closes (the rest of today's bills
+  // would count for tomorrow — Open day moves on to the next date).
+  const [confirmEarly, setConfirmEarly] = useState(false);
 
   const drawers = useLiveQuery<Drawer>(bizDate ? `drawers:${session.cid}:${bizDate}` : null, (db) => query(collection(db, paths.col(session.cid, "drawers")), where("businessDate", "==", bizDate)));
   const terminals = useLiveQuery<Terminal>(`terminals:${session.cid}`, (db) => collection(db, paths.col(session.cid, "terminals")));
@@ -76,8 +79,12 @@ export function EndOfDay({ onCancel }: { onCancel: () => void }) {
   ];
   const ready = checks.every((c) => c.ok) && counted != null && Boolean(bizDate && operator);
 
+  const nowMs = useNow(30_000);
+  const early = Boolean(bizDate && isEarlyClose(bizDate, nowMs, session.client.day.cutoffMin));
+
   async function close() {
     if (!ready || !bizDate || !operator || counted == null) return;
+    if (early && !confirmEarly) return setConfirmEarly(true);
     setBusy(true);
     setError(null);
     try {
@@ -127,8 +134,17 @@ export function EndOfDay({ onCancel }: { onCancel: () => void }) {
         <Text className="text-base text-muted-foreground">Count the cash in the drawer</Text>
         <Text className="text-5xl font-bold tabular-nums">₹{amount || "0"}</Text>
         <Keypad onKey={(k) => setAmount((a) => applyKey(a, k))} />
-        <Button size="xl" onPress={() => void close()} disabled={!ready || busy} accessibilityLabel="Close the day and print the Z report">
-          <Text>{busy ? "Closing…" : "Close day and print Z"}</Text>
+        {confirmEarly && early && bizDate ? (
+          <View className="gap-2 rounded-xl border border-primary/50 bg-primary/10 p-3">
+            <Text className="text-base font-semibold text-primary">It&apos;s only {istClock(nowMs)}.</Text>
+            <Text className="text-base">After closing, the rest of today&apos;s bills count for tomorrow, {bizDateLabel(addDays(bizDate, 1))}. Close the day now?</Text>
+            <Button variant="ghost" onPress={() => setConfirmEarly(false)} disabled={busy} accessibilityLabel="Don't close the day yet">
+              <Text>Not yet</Text>
+            </Button>
+          </View>
+        ) : null}
+        <Button size="xl" onPress={() => void close()} disabled={!ready || busy} accessibilityLabel={confirmEarly && early ? "Yes, close the day now" : "Close the day and print the Z report"}>
+          <Text>{busy ? "Closing…" : confirmEarly && early ? "Yes, close the day now" : "Close day and print Z"}</Text>
         </Button>
       </View>
     </ScrollView>

@@ -24,7 +24,7 @@ describe("month keys", () => {
 const day = (id: string, zNo: number | null, ranges: Array<{ series: string; first: string; last: string; count: number; cancelled: number }> = []): Pick<Day, "status" | "zNo" | "z"> & { id: string } =>
   ({ id, status: zNo ? "closed" : "open", ...(zNo ? { zNo, z: { invoiceRanges: ranges } } : {}) }) as unknown as Pick<Day, "status" | "zNo" | "z"> & { id: string };
 
-const stats = (id: string, o: Partial<DailyStats>): Partial<DailyStats> & { id: string } => ({ id, businessDate: id, lastPostingKey: "k", updatedAtMs: 1, ...o });
+const stats = (id: string, o: Partial<DailyStats>): Partial<DailyStats> & { id: string; updatedAtMs: number } => ({ id, businessDate: id, lastPostingKey: "k", updatedAtMs: 1, ...o });
 
 describe("month report", () => {
   const days = [

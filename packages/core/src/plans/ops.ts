@@ -221,6 +221,8 @@ export function zClosePlan(
     approver?: { id: string; name?: string };
     /** The day's record was missing (e.g. wiped with test data): write when and by whom it counts as opened. */
     opened?: { atMs: number; by: string };
+    /** A reopened day closing again keeps its Z number: the outlet's lastZNo isn't moved. */
+    reclose?: boolean;
   },
 ): WritePlan {
   const path = paths.day(ctx.cid, i.businessDate);
@@ -241,9 +243,9 @@ export function zClosePlan(
           updatedAtMs: ctx.nowMs,
         },
       },
-      { path: paths.client(ctx.cid), op: "update", data: { lastZNo: i.zNo, updatedAtMs: ctx.nowMs } },
+      ...(i.reclose ? [] : [{ path: paths.client(ctx.cid), op: "update" as const, data: { lastZNo: i.zNo, updatedAtMs: ctx.nowMs } }]),
       { path: paths.stockSnapshot(ctx.cid, i.businessDate), op: "set", data: { businessDate: i.businessDate, items: i.snapshot, ...(i.counted ? { counted: i.counted } : {}), ...(i.materials ? { materials: i.materials } : {}), createdAtMs: ctx.nowMs } },
-      auditOp(ctx, { action: "day.close", target: { type: "day", id: i.businessDate }, after: { zNo: i.zNo, totalPaise: i.z.totalPaise }, ...(i.approver ? { approver: i.approver } : {}) }),
+      auditOp(ctx, { action: "day.close", target: { type: "day", id: i.businessDate }, after: { zNo: i.zNo, totalPaise: i.z.totalPaise, ...(i.reclose ? { reclosed: true } : {}) }, ...(i.approver ? { approver: i.approver } : {}) }),
     ],
     primaryPath: path,
   };
@@ -288,7 +290,9 @@ export interface CloseDayInput {
  */
 export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan; z: ZReport; zNo: number } {
   if (i.day?.status === "closed") throw new Error(`Business day ${i.businessDate} is already closed (Z ${i.day.zNo ?? ""}).`);
-  const zNo = (i.lastZNo || 0) + 1;
+  // A reopened day (it already has a Z number) closes again under the same number.
+  const reclose = i.day?.zNo != null;
+  const zNo = reclose ? i.day!.zNo! : (i.lastZNo || 0) + 1;
   const stats = i.stats ?? {};
   const ops: PlanOp[] = [];
   const counted: Record<string, Paise | undefined> = {};
@@ -342,6 +346,7 @@ export function closeDayPlan(ctx: PlanCtx, i: CloseDayInput): { plan: WritePlan;
     snapshot: snapshotFromLedger(i.prevSnapshot ?? {}, stats.stock),
     ...(i.prevMaterials || stats.mat ? { materials: snapshotMaterials(i.prevMaterials ?? {}, stats.mat) } : {}),
     ...(i.approver ? { approver: i.approver } : {}),
+    ...(reclose ? { reclose: true } : {}),
     // No day record (wiped while the till kept the day open): it counts as opened at that day's start.
     ...(i.day ? {} : { opened: { atMs: Date.parse(`${i.businessDate}T00:00:00+05:30`), by: ctx.actorId } }),
   });
@@ -354,17 +359,6 @@ export function dayCarryForwardPlan(ctx: PlanCtx, businessDate: BizDate, approve
     ops: [
       { path: paths.day(ctx.cid, businessDate), op: "merge", data: { carriedForward: true, updatedAtMs: ctx.nowMs } },
       auditOp(ctx, { action: "day.carry_forward", target: { type: "day", id: businessDate }, ...(approver ? { approver } : {}) }),
-    ],
-    primaryPath: paths.day(ctx.cid, businessDate),
-  };
-}
-
-export function dayReopenPlan(ctx: PlanCtx, businessDate: BizDate, reason: string): WritePlan {
-  return {
-    label: `Reopen ${businessDate}`,
-    ops: [
-      { path: paths.day(ctx.cid, businessDate), op: "merge", data: { status: "open", reopenedAtMs: ctx.nowMs, reopenedBy: ctx.actorId, updatedAtMs: ctx.nowMs } },
-      auditOp(ctx, { action: "day.reopen", target: { type: "day", id: businessDate }, reason }),
     ],
     primaryPath: paths.day(ctx.cid, businessDate),
   };

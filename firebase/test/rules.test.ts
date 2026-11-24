@@ -40,8 +40,13 @@ import {
   vendorPaymentPlan,
   vendorPaymentVoidPlan,
   zClosePlan,
+  dayMovePlan,
+  recountPlan,
+  reopenDayPlan,
+  retagPlans,
+  withoutCash,
 } from "@px-pos/core";
-import type { ItemRecipe, OrderLine, OrderRef, PlanCtx, PurchaseInput, VendorProfile, ZReport } from "@px-pos/core";
+import type { DailyStats, Day, Drawer, ItemRecipe, MisplacedGroup, OrderLine, OrderRef, PlanCtx, Posting, PurchaseInput, VendorProfile, ZReport } from "@px-pos/core";
 import { applyPlan } from "./apply-plan";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -331,6 +336,94 @@ describe("end of day (closeDayPlan)", () => {
     await assertSucceeds(applyPlan(db("adminA"), closeDayPlan(adminCtx("adminA"), input({})).plan));
     const day = await getDoc(doc(db("adminA"), `clients/c1/days/${BD}`));
     expect(day.data()).toMatchObject({ status: "closed", zNo: 1 });
+  });
+});
+
+describe("fixing a closed day", () => {
+  const PREV = "2026-09-28";
+  const drawerOf = (bd: string) => ({ id: `${bd}_t1`, terminalId: "t1", businessDate: bd, openingFloatPaise: 0, openedBy: "staff1", openedAtMs: NOW, status: "open" as const, updatedAtMs: NOW });
+  const read = async <T,>(path: string): Promise<T | null> => {
+    let out: T | null = null;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const snap = await getDoc(doc(ctx.firestore() as unknown as Firestore, path));
+      out = snap.exists() ? (snap.data() as T) : null;
+    });
+    return out;
+  };
+
+  /** PREV closed as Z 1; BD sold two quick bills and closed as Z 2 (q1 really belongs to PREV). */
+  async function twoClosedDays() {
+    const d = db("dev1");
+    await applyPlan(d, dayOpenPlan(termCtx(), { businessDate: PREV, floatPaise: 0, createDay: true }));
+    await applyPlan(d, closeDayPlan(termCtx(), { businessDate: PREV, lastZNo: 0, day: { status: "open" }, stats: null, drawers: [drawerOf(PREV)], invoices: [], prevSnapshot: null, counts: { t1: { countedPaise: 0 } } }).plan);
+    await applyPlan(d, dayOpenPlan(termCtx(), { businessDate: BD, floatPaise: 0, createDay: true }));
+    await applyPlan(d, quick("q1", 1));
+    await applyPlan(d, quick("q2", 2));
+    const stats = await read<DailyStats>(`clients/c1/dailyStats/${BD}`);
+    await applyPlan(d, closeDayPlan(termCtx(), { businessDate: BD, lastZNo: 1, day: { status: "open" }, stats, drawers: [drawerOf(BD)], invoices: [], prevSnapshot: null, counts: { t1: { countedPaise: 0 } } }).plan);
+    const posting = (await read<Posting>("clients/c1/postings/quick:q1"))!;
+    const group: MisplacedGroup = { to: PREV, keys: ["quick:q1"], orderIds: ["q1"], bills: 1, firstMs: NOW, lastMs: NOW, totalPaise: Number(posting.stats.totalPaise), byPay: {}, delta: withoutCash(posting.stats) };
+    const move = async (ctx: PlanCtx) =>
+      dayMovePlan(ctx, {
+        from: BD,
+        group,
+        reason: "Closed early",
+        fromDay: await read<Day>(`clients/c1/days/${BD}`),
+        toDay: await read<Day>(`clients/c1/days/${PREV}`),
+        fromStats: await read<DailyStats>(`clients/c1/dailyStats/${BD}`),
+        toStats: await read<DailyStats>(`clients/c1/dailyStats/${PREV}`),
+        fromInvoices: [],
+        toInvoices: [],
+      });
+    return { move };
+  }
+
+  it("the outlet's admin moves bills to the day they were sold; tills and other admins can't; never twice", async () => {
+    const { move } = await twoClosedDays();
+    await assertFails(applyPlan(db("dev1"), (await move(termCtx())).plan));
+    await assertFails(applyPlan(db("adminB"), (await move(adminCtx("adminB"))).plan));
+    const { plan, moveId } = await move(adminCtx("adminA"));
+    await assertSucceeds(applyPlan(db("adminA"), plan));
+    await assertFails(applyPlan(db("adminA"), plan));
+    const prev = (await read<Day>(`clients/c1/days/${PREV}`))!;
+    expect(prev.z).toMatchObject({ zNo: 1, orders: 1 });
+    expect(prev.zFirst).toMatchObject({ zNo: 1, orders: 0 });
+    expect((await read<Day>(`clients/c1/days/${BD}`))!.z).toMatchObject({ zNo: 2, orders: 1 });
+    // Re-dating: only the business day (never another field), and only by an admin.
+    const [retag] = retagPlans(adminCtx("adminA"), { moveId, from: BD, to: PREV, orderIds: ["q1"], invoiceIds: [inv(1).invoiceId] });
+    await assertFails(applyPlan(db("dev1"), retag!));
+    await assertSucceeds(applyPlan(db("adminA"), retag!));
+    expect(await read(`clients/c1/invoices/${inv(1).invoiceId}`)).toMatchObject({ businessDate: PREV, movedFrom: BD });
+    await assertFails(updateDoc(doc(db("adminA"), `clients/c1/invoices/${inv(2).invoiceId}`), { businessDate: PREV, status: "cancelled" }));
+    await assertFails(updateDoc(doc(db("adminA"), `clients/c1/dayMoves/${moveId}`), { to: "2026-01-01" }));
+  });
+
+  it("an admin corrects a count; a closed month blocks it (except for the super admin)", async () => {
+    await twoClosedDays();
+    const recount = async (uid: string, ctx: PlanCtx, counted: number) =>
+      applyPlan(db(uid), recountPlan(ctx, { businessDate: BD, day: (await read<Day>(`clients/c1/days/${BD}`))!, drawer: { ...(await read<Drawer>(`clients/c1/drawers/${BD}_t1`))!, id: `${BD}_t1` }, countedPaise: counted, reason: "Typed wrong" }));
+    await assertFails(recount("dev1", termCtx(), 100));
+    await assertSucceeds(recount("adminA", adminCtx("adminA"), 100));
+    expect((await read<Day>(`clients/c1/days/${BD}`))!.z?.drawers[0]).toMatchObject({ countedPaise: 100 });
+    await assertSucceeds(applyPlan(db("adminA"), closeMonthPlan(adminCtx("adminA"), { month: "2026-09", report: monthReport({ month: "2026-09", days: [], stats: [], builtAtMs: NOW }) })));
+    await assertFails(recount("adminA", adminCtx("adminA"), 200));
+    await assertSucceeds(recount("super", adminCtx("super"), 200));
+  });
+
+  it("an admin reopens a day; the till closes it again under the same Z number", async () => {
+    await twoClosedDays();
+    const day = (await read<Day>(`clients/c1/days/${BD}`))!;
+    const drawer = { ...(await read<Drawer>(`clients/c1/drawers/${BD}_t1`))!, id: `${BD}_t1` };
+    await assertFails(applyPlan(db("dev1"), reopenDayPlan(termCtx(), { businessDate: BD, day, drawers: [drawer], reason: "Closed by mistake" })));
+    await assertSucceeds(applyPlan(db("adminA"), reopenDayPlan(adminCtx("adminA"), { businessDate: BD, day, drawers: [drawer], reason: "Closed by mistake" })));
+    const reopened = (await read<Day>(`clients/c1/days/${BD}`))!;
+    expect(reopened).toMatchObject({ status: "open", zNo: 2 });
+    const stats = await read<DailyStats>(`clients/c1/dailyStats/${BD}`);
+    const open = { ...(await read<Drawer>(`clients/c1/drawers/${BD}_t1`))!, id: `${BD}_t1` };
+    const { plan, zNo } = closeDayPlan(termCtx(), { businessDate: BD, lastZNo: 2, day: reopened, stats, drawers: [open], invoices: [], prevSnapshot: null, counts: { t1: { countedPaise: 0 } } });
+    expect(zNo).toBe(2);
+    await assertSucceeds(applyPlan(db("dev1"), plan));
+    expect(await read(`clients/c1`)).toMatchObject({ lastZNo: 2 });
   });
 });
 

@@ -35,3 +35,4 @@ export * from "./plans/admin";
 export * from "./plans/vendors";
 export * from "./plans/inventory";
 export * from "./plans/month";
+export * from "./plans/day-fix";

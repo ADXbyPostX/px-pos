@@ -54,6 +54,13 @@ export function istTime(ms: number): string {
 }
 
 /** "29 Sep 2026" in IST. */
+/** "3:10 pm" (IST), for sentences. */
+export function istClock(ms: number): string {
+  const p = istParts(ms);
+  const h = p.hour % 12 || 12;
+  return `${h}:${pad2(p.minute)} ${p.hour < 12 ? "am" : "pm"}`;
+}
+
 export function istDateLabel(ms: number): string {
   const p = istParts(ms);
   return `${p.day} ${MONTHS_SHORT[p.month - 1]} ${p.year}`;

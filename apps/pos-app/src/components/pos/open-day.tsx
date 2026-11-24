@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { addDays, bizDateLabel, can, dayOpenPlan, formatINR, parseINR, paths, type Day } from "@px-pos/core";
+import { addDays, bizDateLabel, can, dayOpenPlan, formatINR, isEarlyClose, istClock, parseINR, paths, type Day } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { planCtx } from "@/actions/context";
@@ -50,9 +50,16 @@ export function OpenDay() {
         <Text className={phone ? "text-3xl font-bold" : "text-4xl font-bold"}>Open the day</Text>
         <Text className="text-xl text-muted-foreground">Business day {bizDateLabel(target, true)}</Text>
         {base.data?.status === "closed" ? (
-          <Text className="text-lg text-success">
-            {bizDateLabel(suggestedBizDate)} is closed{base.data.zNo ? ` (Z ${base.data.zNo})` : ""}.
-          </Text>
+          // Today was closed early: opening now puts the rest of today's bills on tomorrow.
+          base.data.closedAtMs && isEarlyClose(suggestedBizDate, base.data.closedAtMs, session.client.day.cutoffMin) ? (
+            <Text className="text-lg text-primary">
+              Today, {bizDateLabel(suggestedBizDate)}, was closed at {istClock(base.data.closedAtMs)}{base.data.zNo ? ` (Z ${base.data.zNo})` : ""}. Bills from now count for {bizDateLabel(target)}. If that was a mistake, ask your admin to reopen today first.
+            </Text>
+          ) : (
+            <Text className="text-lg text-success">
+              {bizDateLabel(suggestedBizDate)} is closed{base.data.zNo ? ` (Z ${base.data.zNo})` : ""}.
+            </Text>
+          )
         ) : null}
         {closed ? <Text className="text-lg text-primary">This business day was already closed. Ask a manager to reopen it in PX POS Admin.</Text> : null}
         {!allowed ? <Text className="text-lg text-warning">A cashier or manager has to open the day.</Text> : null}
@@ -66,8 +73,10 @@ export function OpenDay() {
         <Text className="text-base text-muted-foreground">Opening cash in the drawer</Text>
         <Text className="text-5xl font-bold tabular-nums">₹{amount || "0"}</Text>
         <Keypad onKey={(k) => setAmount((a) => applyKey(a, k))} />
-        <Button size="xl" onPress={open} disabled={!allowed || closed}>
-          <Text>Open day with {formatINR(float, { decimals: "auto" })}</Text>
+        <Button size="xl" onPress={open} disabled={!allowed || closed} accessibilityLabel={`Open the business day ${bizDateLabel(target)}`}>
+          <Text>
+            Open {bizDateLabel(target)} with {formatINR(float, { decimals: "auto" })}
+          </Text>
         </Button>
       </View>
     </ScrollView>

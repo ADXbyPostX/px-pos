@@ -60,6 +60,8 @@ const ACTION_LABEL: Record<string, string> = {
   "drawer.close": "Drawer closed",
   "day.close": "Day closed (Z)",
   "day.reopen": "Day reopened",
+  "day.move": "Bills moved to the day they were sold",
+  "drawer.recount": "Cash count corrected",
   "day.carry_forward": "Day carried forward",
   "month.close": "Month closed",
   "month.reopen": "Month reopened",
