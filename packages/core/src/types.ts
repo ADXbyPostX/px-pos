@@ -155,6 +155,8 @@ export interface Client extends Meta {
   lastZNo: number;
   /** Where UPI payments go; the till shows a QR with the amount when set. */
   upi?: UpiAccount;
+  /** Who gets the Z report and item sales by email when a day closes (admin › End of day › Email list). */
+  eodMail?: { to: string[]; updatedAtMs?: number };
 }
 
 /**

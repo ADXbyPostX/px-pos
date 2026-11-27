@@ -5,6 +5,7 @@ import { addDays, bizDateLabel, can, cashStats, expectedCashFor, formatINR, isEa
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { closeDayOnTill } from "@/actions/day";
+import { requestEodMail } from "@/actions/eod-mail";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { useLiveQuery, useNow } from "@/hooks/use-live";
 import { cn } from "@/lib/utils";
@@ -91,6 +92,8 @@ export function EndOfDay({ onCancel }: { onCancel: () => void }) {
       const { z } = await closeDayOnTill(session, operator, bizDate, counted);
       // The day doc now reads closed and the till moves on to Open day; the Z prints meanwhile.
       void printZ(session.terminal, session.client.name, z, Object.fromEntries(terminals.data.map((t) => [t.id, t.name])));
+      // The outlet's end-of-day email (admin › End of day › Email list), if it has one.
+      if (session.client.eodMail?.to?.length) void requestEodMail(session.cid, bizDate);
     } catch (e) {
       setError(errorText(e));
       setBusy(false);

@@ -70,7 +70,7 @@ PX POS is for outlets set up by PostX. A device must be paired by PostX before i
 
 | Section | Answer |
 |---|---|
-| Privacy policy | `https://px-pos.vercel.app/privacy` (published once the wording in `privacy-policy.md` is approved) |
+| Privacy policy | `https://pxpos.postx.in/privacy` (published once the wording in `privacy-policy.md` is approved) |
 | Ads | **No**, the app doesn't contain ads |
 | App access | **All or some functionality is restricted.** Add instructions with the reviewer invite code (being built; needed before Production) |
 | Content rating | Category **"All other app types"**. Answer **No** to every question (no violence, no user-generated content shared between users, no location sharing, no digital purchases). Expected rating: Everyone / 3+ |

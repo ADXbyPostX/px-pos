@@ -218,6 +218,13 @@ service cloud.firestore {
               && changed().hasOnly(['z', 'zFirst', 'corrections', 'status', 'reopenedAtMs', 'reopenedBy', 'reopenReason', 'updatedAtMs'])
               && !monthClosed(c, d));
       }
+      // A business day's end-of-day email (written by pos-admin's /api/eod-mail with the caller's own
+      // sign-in: the till or admin that closed the day, or an admin sending it again).
+      match /eodMails/{d} {
+        allow create, update: if canRead(c) && request.resource.data.businessDate == d
+          && request.resource.data.keys().hasOnly(['businessDate', 'status', 'to', 'attempts', 'lastAttemptMs', 'sentAtMs', 'messageId', 'error', 'by', 'source', 'updatedAtMs'])
+          && request.resource.data.status in ['sending', 'sent', 'failed'];
+      }
       // Bills moved between business days: written with the move's own "out" posting, then marked re-dated.
       match /dayMoves/{id} {
         allow create: if canManage(c) && postedNow(c, 'dmove:' + id + ':out');

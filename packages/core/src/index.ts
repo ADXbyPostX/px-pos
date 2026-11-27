@@ -26,6 +26,7 @@ export * from "./vendors";
 export * from "./inventory";
 export * from "./month";
 export * from "./item-sales";
+export * from "./eod-mail";
 export * from "./plans/types";
 export * from "./plans/common";
 export * from "./plans/order";

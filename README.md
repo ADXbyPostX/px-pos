@@ -4,7 +4,7 @@ PostX point of sale for restaurants and cafés, on one Firebase backend (`postx-
 
 | Part | What it is | Where it runs |
 |---|---|---|
-| **pos-admin** (`apps/pos-admin`) | Back office: clients, menu, staff, terminals, settings, orders, vendors, stock, end of day | [px-pos.vercel.app](https://px-pos.vercel.app) (Next.js 16) |
+| **pos-admin** (`apps/pos-admin`) | Back office: clients, menu, staff, terminals, settings, orders, vendors, stock, end of day | [pxpos.postx.in](https://pxpos.postx.in) (Next.js 16) |
 | **pos-app** (`apps/pos-app`) | The till: orders, KOTs, payments, printing, cash drawer, customer display, works offline | Android POS terminals and phones (Expo dev build, APK) |
 | **@px-pos/core** (`packages/core`) | Shared bill maths, receipts, numbering and write plans | Used by both apps |
 | **firebase/** | Firestore rules, indexes and rules tests | Firebase project `postx-pos` |
@@ -13,10 +13,10 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.1.2**, **admin v1.4.0**.
+Current version: **till v1.1.3**, **admin v1.5.0**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.4.0"). It comes from `apps/pos-admin/package.json`.
-- **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.2 → 10102.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.5.0"). It comes from `apps/pos-admin/package.json`.
+- **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.3 → 10103.
 
 ### Releasing a new version
 
@@ -46,6 +46,12 @@ Release builds are signed with the PX POS **upload key**: `apps/pos-app/credenti
 `apps/pos-admin/.env.local` and the app's `google-services.json` aren't in git. See CLAUDE.md › Environment for how to get them.
 
 ## Changes
+
+### Admin v1.5.0 and till v1.1.3 (27 Nov 2026)
+
+- **New address:** the admin lives at **https://pxpos.postx.in** (px-pos.vercel.app before).
+- **End-of-day email** (admin › End of day › **Email list**, up to 10 addresses per outlet). When a day closes, on the till (1.1.3+) or in admin, the Z report and the item sales go to the list as two designed A4 PDFs, from `PX POS <reports@pxpos.postx.in>`, with the day's figures and best sellers in the email itself. Each closed day shows whether its email went, with **Send reports** / **Send again** (held back for a minute after a send).
+- Sending goes through Resend (Vercel Marketplace, `RESEND_API_KEY` on the px-pos project) and needs the `pxpos.postx.in` domain verified in Resend (DNS records). Until then the email list can be filled in and each day says sending isn't switched on yet.
 
 ### Admin v1.4.0 and till v1.1.2 (25 Nov 2026)
 

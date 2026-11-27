@@ -32,6 +32,7 @@ export const COL = {
   inventory: "inventory",
   months: "months",
   dayMoves: "dayMoves",
+  eodMails: "eodMails",
 } as const;
 
 export type ClientCollection = (typeof COL)[keyof typeof COL];
@@ -72,6 +73,8 @@ export const paths = {
   month: (cid: string, m: string) => `clients/${cid}/${COL.months}/${m}`,
   /** Bills moved between business days (DayMove). */
   dayMove: (cid: string, id: string) => `clients/${cid}/${COL.dayMoves}/${id}`,
+  /** What happened to a business day's end-of-day email (EodMailLog). */
+  eodMail: (cid: string, d: string) => `clients/${cid}/${COL.eodMails}/${d}`,
 } as const;
 
 /** Posting keys: the exactly-once ledger id for every stats/stock-moving batch. */

@@ -29,6 +29,8 @@ const csp = [
 const nextConfig: NextConfig = {
   // Shown in the sidebar footer; bump `version` in package.json for each release.
   env: { NEXT_PUBLIC_APP_VERSION: pkg.version },
+  // The end-of-day PDFs read their fonts and logo from disk: ship them with that function.
+  outputFileTracingIncludes: { "/api/eod-mail": ["src/server/pdf/assets/**/*"] },
   async headers() {
     return [
       {

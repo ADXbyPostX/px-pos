@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { collection, documentId, limit, orderBy, query, where } from "firebase/firestore";
-import { CalendarCheck, ChevronDown } from "lucide-react";
+import { CalendarCheck, ChevronDown, Mail } from "lucide-react";
 import { addDays, bizDateLabel, businessDateFor, paths, receiptText, renderZ, vendorDay, zReport, type DailyStats, type Day, type Drawer, type Staff, type Terminal, type ZReport } from "@px-pos/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -20,6 +20,7 @@ import { useCollection, useNow, type WithId } from "@/lib/firebase/hooks";
 import { fmtDateTime } from "@/lib/format";
 import { CloseDayDialog } from "./close-day-dialog";
 import { MoveBillsDialog, PendingMoves, RecountDialog, ReopenDialog } from "./day-fix";
+import { EodMailDialog, EodMailStatus } from "./eod-mail";
 import { DayItems } from "./day-items";
 
 type Row = WithId<Day> & { stats?: WithId<DailyStats> };
@@ -66,6 +67,8 @@ export function DayView() {
   const [recounting, setRecounting] = useState<string | null>(null);
   const [reopening, setReopening] = useState<string | null>(null);
   const months = useMonths(cid);
+  const [mailList, setMailList] = useState(false);
+  const mailCount = client.eodMail?.to?.length ?? 0;
 
   const rows = useMemo<Row[]>(() => {
     const byDate = new Map(stats.data.map((s) => [s.id, s]));
@@ -160,7 +163,15 @@ export function DayView() {
 
   return (
     <>
-      <PageHeader title="End of day" />
+      <PageHeader
+        title="End of day"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setMailList(true)}>
+            <Mail data-icon="inline-start" aria-hidden />
+            {mailCount ? `Email list (${mailCount})` : "Email list"}
+          </Button>
+        }
+      />
       <Stats>
         <Stat label="Open days" value={openDays.length} accent={late.length > 0} sub={late.length ? `${late.length} from an earlier date` : undefined} />
         <Stat label="Last Z" value={lastClosed ? `#${lastClosed.zNo ?? "—"}` : "—"} sub={lastClosed ? bizDateLabel(lastClosed.id, true) : undefined} />
@@ -231,6 +242,11 @@ export function DayView() {
       >
         {open && months.isFrozen(open.id) ? <p className="mb-3 text-sm text-muted-foreground">This day is in a closed month, so it can&apos;t be changed. Only the super admin can reopen the month (End of day › Months).</p> : null}
         {open ? <PendingMoves cid={cid} businessDate={open.id} /> : null}
+        {open?.status === "closed" ? (
+          <div className="mb-3">
+            <EodMailStatus businessDate={open.id} />
+          </div>
+        ) : null}
         {open && report ? (
           <Tabs value={tab} onValueChange={(v) => setTab(v as "z" | "items")} className="gap-3">
             <TabsList className="w-full">
@@ -255,6 +271,7 @@ export function DayView() {
           </Tabs>
         ) : null}
       </RecordSheet>
+      <EodMailDialog open={mailList} onOpenChange={setMailList} />
       <MoveBillsDialog cid={cid} from={moving} cutoffMin={client.day.cutoffMin} totalOf={totalOn} isFrozen={months.isFrozen} onOpenChange={(o) => !o && setMoving(null)} />
       <RecountDialog cid={cid} businessDate={recounting} day={recountDay} terminalNames={terminalNames} onOpenChange={(o) => !o && setRecounting(null)} />
       <ReopenDialog cid={cid} businessDate={reopening} day={reopening ? (rows.find((x) => x.id === reopening) ?? null) : null} today={today} onOpenChange={(o) => !o && setReopening(null)} />

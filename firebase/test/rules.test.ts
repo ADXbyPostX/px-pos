@@ -427,6 +427,20 @@ describe("fixing a closed day", () => {
   });
 });
 
+describe("end-of-day email log", () => {
+  const log = (status: string, extra: Record<string, unknown> = {}) => ({ businessDate: BD, status, to: ["a@x.in"], attempts: 1, lastAttemptMs: NOW, by: "dev1", source: "app", updatedAtMs: NOW, ...extra });
+  it("the outlet's till or admin writes it; others can't; only its own fields", async () => {
+    await assertSucceeds(setDoc(doc(db("dev1"), `clients/c1/eodMails/${BD}`), log("sending")));
+    await assertSucceeds(setDoc(doc(db("adminA"), `clients/c1/eodMails/${BD}`), log("sent", { sentAtMs: NOW, messageId: "m1" })));
+    await assertFails(setDoc(doc(db("adminB"), `clients/c1/eodMails/${BD}`), log("sent")));
+    await assertFails(setDoc(doc(db("rando"), `clients/c1/eodMails/${BD}`), log("sent")));
+    await assertFails(setDoc(doc(db("dev1"), `clients/c1/eodMails/${BD}`), log("lost")));
+    await assertFails(setDoc(doc(db("dev1"), `clients/c1/eodMails/2026-01-01`), log("sent")));
+    await assertFails(setDoc(doc(db("dev1"), `clients/c1/eodMails/${BD}`), log("sent", { zNo: 5 })));
+    await assertFails(deleteDoc(doc(db("adminA"), `clients/c1/eodMails/${BD}`)));
+  });
+});
+
 describe("cross-client views", () => {
   it("collection-group reads are super-admin only", async () => {
     await assertSucceeds(applyPlan(db("dev1"), quick("q1", 1)));

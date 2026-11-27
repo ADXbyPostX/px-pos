@@ -1,6 +1,6 @@
 # PX POS Privacy Policy
 
-_Draft for Mandy's approval. Once approved it's published at https://px-pos.vercel.app/privacy and linked from Google Play._
+_Draft for Mandy's approval. Once approved it's published at https://pxpos.postx.in/privacy and linked from Google Play._
 
 **Last updated: 8 October 2026**
 

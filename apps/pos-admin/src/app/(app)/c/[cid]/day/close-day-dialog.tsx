@@ -12,6 +12,7 @@ import { FormError } from "@/components/shared/form-controls";
 import { Money } from "@/components/shared/money";
 import { usePrincipal } from "@/components/providers/principal-provider";
 import { closeDayFromAdmin } from "@/lib/day-close";
+import { requestEodMail } from "@/lib/eod-mail";
 import { firestoreMessage } from "@/lib/firebase/apply-plan";
 import { useCollection, type WithId } from "@/lib/firebase/hooks";
 
@@ -48,6 +49,10 @@ export function CloseDayDialog({ cid, businessDate, today, stats, terminals, onO
     try {
       const { zNo } = await closeDayFromAdmin(planCtx(cid), d, parsed);
       toast.success(`Business day ${bizDateLabel(d)} closed · Z ${zNo}`);
+      // Email the reports to the outlet's list (if it has one) without holding up the close.
+      void requestEodMail(cid, d)
+        .then((r) => (r.error ? toast.error(`Reports not emailed: ${r.error}`) : r.sent ? toast.success(`Reports emailed to ${r.to?.length ?? 0} address${r.to?.length === 1 ? "" : "es"}`) : undefined))
+        .catch(() => toast.error("Reports not emailed: couldn't reach PX POS."));
       setCounts({});
       onOpenChange(false);
     } catch (e) {
