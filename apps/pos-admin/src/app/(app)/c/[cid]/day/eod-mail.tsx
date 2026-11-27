@@ -107,7 +107,7 @@ export function EodMailDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           <p className="text-muted-foreground">No addresses yet, so no email goes out.</p>
         )}
         <p className="text-muted-foreground">
-          {list.length}/{MAX_EOD_RECIPIENTS} addresses. Mail comes from reports@pxpos.postx.in.
+          {list.length}/{MAX_EOD_RECIPIENTS} addresses.
         </p>
       </div>
     </FormDialog>

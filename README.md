@@ -13,9 +13,9 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.1.3**, **admin v1.5.1**.
+Current version: **till v1.1.3**, **admin v1.5.2**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.5.1"). It comes from `apps/pos-admin/package.json`.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.5.2"). It comes from `apps/pos-admin/package.json`.
 - **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.3 → 10103.
 
 ### Releasing a new version
@@ -47,11 +47,15 @@ Release builds are signed with the PX POS **upload key**: `apps/pos-app/credenti
 
 ## Changes
 
+### Admin v1.5.2 (27 Nov 2026)
+
+- **End-of-day email goes out over plain SMTP** instead of Resend (no monthly fee): by default a Gmail mailbox with an app password. Set on the px-pos project in Vercel (Production + Preview): `SMTP_USER` (the mailbox), `SMTP_PASS` (its app password), optional `SMTP_HOST` / `SMTP_PORT` for another provider (default `smtp.gmail.com` / `465`) and `EOD_MAIL_FROM` (default `PX POS <SMTP_USER>`; Gmail only sends as its own address or a Gmail alias). Redeploy after changing them. If something's missing, each day's email line says which part, in brackets.
+
 ### Admin v1.5.0 and till v1.1.3 (27 Nov 2026)
 
 - **New address:** the admin lives at **https://pxpos.postx.in** (px-pos.vercel.app before).
-- **End-of-day email** (admin › End of day › **Email list**, up to 10 addresses per outlet). When a day closes, on the till (1.1.3+) or in admin, the Z report and the item sales go to the list as two designed A4 PDFs, from `PX POS <reports@pxpos.postx.in>`, with the day's figures and best sellers in the email itself. Each closed day shows whether its email went, with **Send reports** / **Send again** (held back for a minute after a send).
-- Sending goes through Resend (Vercel Marketplace, `RESEND_API_KEY` on the px-pos project) and needs the `pxpos.postx.in` domain verified in Resend (DNS records). Until then the email list can be filled in and each day says sending isn't switched on yet.
+- **End-of-day email** (admin › End of day › **Email list**, up to 10 addresses per outlet). When a day closes, on the till (1.1.3+) or in admin, the Z report and the item sales go to the list as two designed A4 PDFs, with the day's figures and best sellers in the email itself. Each closed day shows whether its email went, with **Send reports** / **Send again** (held back for a minute after a send).
+- (Sending moved from Resend to SMTP in v1.5.2.)
 
 ### Admin v1.4.0 and till v1.1.2 (25 Nov 2026)
 

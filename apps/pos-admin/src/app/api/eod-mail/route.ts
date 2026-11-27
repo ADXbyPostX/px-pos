@@ -1,7 +1,7 @@
 import { cleanRecipients, eodFileNames, eodMailSubject, isBizDate, itemSales, paths, type Client, type Day, type EodMailLog, type Invoice, type Terminal } from "@px-pos/core";
 import { eodMailBody } from "@/server/eod-mail-body";
 import { firestoreAs, FirestoreHttpError, uidOf } from "@/server/firestore-rest";
-import { EOD_FROM, MailNotSetUp, sendMail } from "@/server/mail";
+import { eodFrom, MailNotSetUp, sendMail } from "@/server/mail";
 import { itemSalesPdf, zReportPdf } from "@/server/pdf/eod-pdf";
 
 // Two PDFs and one email: a few seconds, with room for a slow mail API.
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
     const files = eodFileNames(day.z);
     const { html, text } = eodMailBody({ outletName: client.name, cid, z: day.z, sales, corrected: corrections.some((c) => c.kind !== "reopen") });
     const sent = await sendMail({
-      from: EOD_FROM,
+      from: eodFrom(),
       to,
       subject: eodMailSubject(client.name, day.z),
       html,
