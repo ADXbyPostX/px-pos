@@ -13,9 +13,9 @@ Developer notes (stack, conventions, hardware, data rules) are in [CLAUDE.md](CL
 
 ## Version
 
-Current version: **till v1.1.3**, **admin v1.5.0**.
+Current version: **till v1.1.3**, **admin v1.5.1**.
 
-- **Admin:** shown at the bottom of the sidebar ("PX POS v1.5.0"). It comes from `apps/pos-admin/package.json`.
+- **Admin:** shown at the bottom of the sidebar ("PX POS v1.5.1"). It comes from `apps/pos-admin/package.json`.
 - **Till:** shown on the sign-in screen and on Sync. Each terminal reports it to admin › Terminals (Device column). It comes from `apps/pos-app/package.json`. Android's build number follows it: 1.1.3 → 10103.
 
 ### Releasing a new version

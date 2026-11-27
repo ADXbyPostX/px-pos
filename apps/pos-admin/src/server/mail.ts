@@ -37,7 +37,7 @@ export async function sendMail(m: Mail): Promise<{ id: string }> {
   }
   // Messages here are shown to outlet admins as they are, so they stay plain; details go to the logs.
   const key = process.env.RESEND_API_KEY;
-  if (!key) throw new MailNotSetUp(NOT_ON);
+  if (!key) throw notOn("no email key on the server yet");
   const { data, error } = await new Resend(key).emails.send({
     from: m.from,
     to: m.to,
@@ -49,14 +49,17 @@ export async function sendMail(m: Mail): Promise<{ id: string }> {
   });
   if (error) {
     console.error("eod-mail: Resend refused the email", error.name, error.statusCode, error.message);
-    // Setup not finished: no or wrong key, or the sending domain isn't verified in Resend yet.
-    if (SETUP_ERRORS.has(error.name) || /domain/i.test(error.message)) throw new MailNotSetUp(NOT_ON);
+    // Setup not finished: the sending domain isn't verified in Resend yet, or the key is wrong.
+    if (/domain/i.test(error.message)) throw notOn(`${m.from.replace(/.*@|>.*/g, "")} isn't verified in Resend yet`);
+    if (error.name === "invalid_from_address") throw notOn("the sender address was refused");
+    if (KEY_ERRORS.has(error.name)) throw notOn("the email key was refused");
     if (QUOTA_ERRORS.has(error.name)) throw new Error("Too many emails were sent today. Try again later.");
     throw new Error(`The email service refused it: ${error.message}`);
   }
   return { id: data.id };
 }
 
-const NOT_ON = "Email sending isn't switched on yet. PostX is setting it up.";
-const SETUP_ERRORS = new Set(["missing_api_key", "invalid_api_key", "restricted_api_key", "invalid_from_address", "invalid_access", "security_error"]);
+/** Setup isn't finished; the reason in brackets tells PostX which step is missing. */
+const notOn = (why: string) => new MailNotSetUp(`Email sending isn't switched on yet. PostX is setting it up. (${why})`);
+const KEY_ERRORS = new Set(["missing_api_key", "invalid_api_key", "restricted_api_key", "invalid_access", "security_error"]);
 const QUOTA_ERRORS = new Set(["daily_quota_exceeded", "monthly_quota_exceeded", "rate_limit_exceeded"]);
